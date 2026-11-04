@@ -1,6 +1,7 @@
 // Chartsmith front end. Talks to server.mjs; the script engine is shared with the server.
 import { runScript, backtest, PRESETS, ScriptError, ok, truthy } from '/engine.mjs';
 import * as GB from '/gridbot.mjs';
+import { pineToChartsmith } from '/pine.mjs';
 
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const store = {
@@ -250,7 +251,8 @@ function axisTag(y, color, text, h = 16) {
   g.fillStyle = '#0b0d10'; g.textAlign = 'left'; g.textBaseline = 'middle'; g.font = '600 10.5px ' + C.mono; g.fillText(text, pw + 5, y);
 }
 function countdown(t) {
-  const s = Math.max(0, Math.floor((t - Date.now()) / 1000)), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+  const s = Math.floor((t - Date.now()) / 1000), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+  if (s <= 0) return ''; // the bar has already closed (delayed feed): no countdown
   return (h ? h + ':' + pad(m) : m) + ':' + pad(s % 60);
 }
 function legend(i, panelTop, hasPanel, plots) {
@@ -412,7 +414,7 @@ async function load(symbol, tf, { keepView = false } = {}) {
     document.title = `${display(S.symbol)} ${fmt(S.bars[S.bars.length - 1].c)} · Chartsmith`;
     $('#afSymbol').value = display(S.symbol);
     runNow(true);
-    if (changed || !keepView) { renderWatch(); loadNews(); renderBotDash(); }
+    if (changed || !keepView) { renderWatch(); loadNews(); renderBotDash(); autoScript(); }
   } catch (e) {
     if (seq === loadSeq) toast(`Couldn't load ${display(symbol)}: ${e.message}`, true);
   } finally { if (seq === loadSeq) $('#loading').hidden = true; }
@@ -581,7 +583,7 @@ $('#alertForm').addEventListener('submit', async e => {
 });
 $('#scriptAlert').addEventListener('click', async () => {
   try {
-    const a = await api('/api/alerts', { method: 'POST', body: JSON.stringify({ symbol: S.symbol, tf: S.tf, kind: 'script', script: ta.value, repeat: 'every', name: `${display(S.symbol)} ${S.tf}: ${(S.out.alerts[0] || {}).msg || 'script alert'}` }) });
+    const a = await api('/api/alerts', { method: 'POST', body: JSON.stringify({ symbol: S.symbol, tf: S.tf, kind: 'script', script: compile(), repeat: 'every', name: `${display(S.symbol)} ${S.tf}: ${(S.out.alerts[0] || {}).msg || 'script alert'}` }) });
     toast(`Script alert on for ${display(S.symbol)} ${S.tf}. It checks each time a ${S.tf} bar closes.`);
     loadAlerts(); return a;
   } catch (err) { toast(err.message, true); }
@@ -610,12 +612,53 @@ function listen() {
 // ---------------------------------------------------------------------------
 // Script editor & backtest
 // ---------------------------------------------------------------------------
-const ta = $('#script'), gutter = $('#gutter'), status = $('#status'), presetSel = $('#preset');
-Object.keys(PRESETS).forEach(k => presetSel.add(new Option('Example: ' + k, k)));
-presetSel.add(new Option('My script', '__mine'));
-const savedScript = store.get('script', null);
-if (savedScript && !Object.values(PRESETS).includes(savedScript)) { ta.value = savedScript; presetSel.value = '__mine'; }
-else { const k = store.get('preset', 'Moving average cross'); presetSel.value = PRESETS[k] ? k : 'Moving average cross'; ta.value = PRESETS[presetSel.value]; }
+const ta = $('#script'), gutter = $('#gutter'), status = $('#status'), scriptSel = $('#scriptSel');
+// Scripts of your own live in the account (every device sees the same list); the examples come with the engine.
+const SCR = { list: [], cur: null, map: null, notes: [], adopting: false };
+ta.value = PRESETS[store.get('preset', 'Moving average cross')] || PRESETS['Moving average cross'];
+function fillScriptSel() {
+  scriptSel.innerHTML = '';
+  const mine = document.createElement('optgroup'); mine.label = 'My scripts';
+  SCR.list.forEach(s => mine.appendChild(new Option(s.name + (s.lang === 'pine' ? ' · Pine' : ''), s.id)));
+  if (!SCR.list.length) mine.appendChild(new Option('(none yet: press + New, or edit an example)', '__none'));
+  const ex = document.createElement('optgroup'); ex.label = 'Examples';
+  Object.keys(PRESETS).forEach(k => ex.appendChild(new Option(k, 'ex:' + k)));
+  scriptSel.append(mine, ex);
+  scriptSel.value = SCR.cur ? SCR.cur.id : 'ex:' + store.get('preset', 'Moving average cross');
+  if (scriptSel.selectedIndex < 0) scriptSel.value = 'ex:Moving average cross';
+}
+function showScript(s) { // a saved script, or null for an example
+  SCR.cur = s; $('#scriptMeta').hidden = !s;
+  if (s) { ta.value = s.src; $('#scriptName').value = s.name; $('#scriptLang').value = s.lang; store.set('scriptId', s.id); }
+  else store.set('scriptId', null);
+  fillScriptSel(); updatePin(); updateGutter(); runNow();
+}
+function updatePin() { $('#scriptPinSym').textContent = display(S.symbol); $('#scriptPin').checked = !!(SCR.cur && SCR.cur.symbols.includes(S.symbol)); }
+const savedNote = t => { const el = $('#scriptSaved'); el.textContent = t; setTimeout(() => { if (el.textContent === t) el.textContent = ''; }, 2500); };
+async function patchScript(fields) {
+  if (!SCR.cur) return;
+  try { Object.assign(SCR.cur, await api('/api/scripts/' + SCR.cur.id, { method: 'PATCH', body: JSON.stringify(fields) })); savedNote('Saved'); }
+  catch (e) { toast("Couldn't save the script: " + e.message, true); }
+}
+async function createScript(fields) {
+  const s = await api('/api/scripts', { method: 'POST', body: JSON.stringify(fields) }); SCR.list.push(s); return s;
+}
+async function loadScripts() {
+  try { SCR.list = await api('/api/scripts'); } catch { SCR.list = []; }
+  const legacy = store.get('script', null); // before 1.4 the one personal script lived in this browser only
+  if (legacy && !Object.values(PRESETS).includes(legacy) && !SCR.list.length) { try { await createScript({ name: 'My script', lang: 'cs', src: legacy }); } catch {} }
+  if (legacy) store.set('script', null);
+  const s = SCR.list.find(x => x.id === store.get('scriptId', null)) || null;
+  showScript(s);
+}
+function autoScript() { // a script marked "use on" this symbol loads by itself
+  const s = SCR.list.find(x => x.symbols.includes(S.symbol));
+  if (s && s !== SCR.cur) showScript(s); else updatePin();
+}
+function compile() { // Pine is translated first; error lines are mapped back to the Pine source
+  if (SCR.cur && SCR.cur.lang === 'pine') { const r = pineToChartsmith(ta.value); SCR.map = r.map; SCR.notes = r.notes; return r.src; }
+  SCR.map = null; SCR.notes = []; return ta.value;
+}
 $('#fee').value = store.get('fee', 0.05); $('#short').checked = store.get('short', false);
 
 let errLine = 0;
@@ -628,31 +671,67 @@ function runNow(quiet) {
   if (!S.bars.length) return;
   const t0 = performance.now();
   try {
-    S.out = runScript(ta.value, S.bars);
+    S.out = runScript(compile(), S.bars);
     S.bt = backtest(S.bars, S.out.signals, { feePct: +$('#fee').value || 0, allowShort: $('#short').checked });
     errLine = 0; status.className = 'status ok';
-    status.textContent = `Ran on ${S.bars.length} bars in ${(performance.now() - t0).toFixed(0)} ms · ${S.out.plots.length} plot${S.out.plots.length === 1 ? '' : 's'}${S.out.alerts.length ? ' · ' + S.out.alerts.length + ' alert condition' + (S.out.alerts.length > 1 ? 's' : '') : ''}`;
+    status.textContent = `Ran on ${S.bars.length} bars in ${(performance.now() - t0).toFixed(0)} ms · ${S.out.plots.length} plot${S.out.plots.length === 1 ? '' : 's'}${S.out.alerts.length ? ' · ' + S.out.alerts.length + ' alert condition' + (S.out.alerts.length > 1 ? 's' : '') : ''}${SCR.notes.length ? ' · ' + SCR.notes.length + ' Pine line' + (SCR.notes.length > 1 ? 's' : '') + ' skipped' : ''}`;
+    status.title = SCR.notes.join('\n');
     $('#scriptAlert').disabled = !S.out.alerts.length;
   } catch (e) {
-    S.out = null; S.bt = null; errLine = e.line || 0; status.className = 'status err';
-    status.textContent = (e.line ? 'Line ' + e.line + ': ' : '') + e.message;
+    S.out = null; S.bt = null; errLine = e.line ? (SCR.map ? SCR.map[e.line - 1] || e.line : e.line) : 0; status.className = 'status err';
+    if (e.line && errLine !== e.line) e = Object.assign(new ScriptError(e.message, errLine), { line: errLine });
+    status.textContent = (e.line ? 'Line ' + e.line + ': ' : '') + e.message; status.title = '';
     $('#scriptAlert').disabled = true;
     if (!(e instanceof ScriptError)) console.error(e);
   }
   updateGutter(); renderResults(); draw();
 }
-let deb;
+let deb, saveDeb;
 ta.addEventListener('input', () => {
-  updateGutter(); store.set('script', ta.value);
-  if (presetSel.value !== '__mine' && ta.value !== PRESETS[presetSel.value]) presetSel.value = '__mine';
+  updateGutter();
+  if (!SCR.cur) adoptExample(); // editing an example turns it into a script of your own
+  else { clearTimeout(saveDeb); saveDeb = setTimeout(() => patchScript({ src: ta.value }), 600); }
   clearTimeout(deb); deb = setTimeout(runNow, 400);
 });
+async function adoptExample() {
+  if (SCR.adopting) return; SCR.adopting = true;
+  try {
+    const name = scriptSel.value.startsWith('ex:') ? scriptSel.value.slice(3) : 'My script';
+    const s = await createScript({ name, lang: 'cs', src: ta.value });
+    SCR.cur = s; $('#scriptMeta').hidden = false; $('#scriptName').value = s.name; $('#scriptLang').value = s.lang; store.set('scriptId', s.id);
+    fillScriptSel(); updatePin(); savedNote(`Saved as “${s.name}”`);
+  } catch (e) { toast("Couldn't save the script: " + e.message, true); }
+  finally { SCR.adopting = false; }
+}
 ta.addEventListener('scroll', () => gutter.scrollTop = ta.scrollTop);
 ta.addEventListener('keydown', e => { if (e.key === 'Tab') { e.preventDefault(); ta.setRangeText('  ', ta.selectionStart, ta.selectionEnd, 'end'); ta.dispatchEvent(new Event('input')); } });
-presetSel.addEventListener('change', () => {
-  if (presetSel.value === '__mine') { const m = store.get('script', ''); if (m) ta.value = m; }
-  else { ta.value = PRESETS[presetSel.value]; store.set('preset', presetSel.value); }
-  runNow();
+scriptSel.addEventListener('change', () => {
+  const v = scriptSel.value;
+  if (v === '__none') return;
+  if (v.startsWith('ex:')) { store.set('preset', v.slice(3)); ta.value = PRESETS[v.slice(3)]; showScript(null); }
+  else showScript(SCR.list.find(s => s.id === v) || null);
+});
+$('#newScript').addEventListener('click', async () => {
+  try {
+    const s = await createScript({ name: 'Script ' + (SCR.list.length + 1), lang: 'cs', src: '// Your script. Switch the language to Pine to paste TradingView code.\nplot(ema(close, 20), "EMA 20", "#f2b544")' });
+    showScript(s); showTab('script'); $('#scriptName').focus(); $('#scriptName').select();
+  } catch (e) { toast(e.message, true); }
+});
+$('#scriptName').addEventListener('change', async () => { await patchScript({ name: $('#scriptName').value }); $('#scriptName').value = SCR.cur.name; fillScriptSel(); });
+$('#scriptLang').addEventListener('change', async () => { await patchScript({ lang: $('#scriptLang').value }); fillScriptSel(); runNow(); });
+$('#scriptPin').addEventListener('change', () => {
+  if (!SCR.cur) return;
+  const on = $('#scriptPin').checked, symbols = SCR.cur.symbols.filter(s => s !== S.symbol); if (on) symbols.push(S.symbol);
+  SCR.list.forEach(s => { if (s !== SCR.cur && on && s.symbols.includes(S.symbol)) { s.symbols = s.symbols.filter(x => x !== S.symbol); api('/api/scripts/' + s.id, { method: 'PATCH', body: JSON.stringify({ symbols: s.symbols }) }).catch(() => {}); } });
+  patchScript({ symbols });
+});
+$('#delScript').addEventListener('click', async e => { // press twice to delete, no popup
+  const b = e.currentTarget;
+  if (!b.classList.contains('arm')) { b.classList.add('arm'); b.textContent = 'Really delete?'; setTimeout(() => { b.classList.remove('arm'); b.textContent = 'Delete'; }, 3000); return; }
+  b.classList.remove('arm'); b.textContent = 'Delete';
+  if (!SCR.cur) return;
+  try { await api('/api/scripts/' + SCR.cur.id, { method: 'DELETE' }); SCR.list = SCR.list.filter(s => s !== SCR.cur); ta.value = PRESETS['Moving average cross']; showScript(null); toast('Script deleted'); }
+  catch (err) { toast(err.message, true); }
 });
 $('#run').addEventListener('click', () => runNow());
 $('#fee').addEventListener('change', () => { store.set('fee', +$('#fee').value); runNow(); });
@@ -1074,7 +1153,7 @@ function openLink(href) {
 }
 markTf(); updateGutter(); renderWatch(); showTab(store.get('tab', 'watch'));
 load(S.symbol, S.tf);
-refreshQuotes(); loadAlerts(); loadLog(); listen(); loadBots().then(loadOverview);
+refreshQuotes(); loadAlerts(); loadLog(); listen(); loadBots().then(loadOverview); loadScripts();
 window.__cs = { S, load, runNow };
 if ('serviceWorker' in navigator && isSecureContext) {
   const hadController = !!navigator.serviceWorker.controller;

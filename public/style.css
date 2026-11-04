@@ -95,6 +95,10 @@ input[type="checkbox"] { height: auto; }
 .gutter { font: 12.5px/20px var(--font-mono); color: #4a5263; text-align: right; padding: 10px 8px 10px 10px; user-select: none; overflow: hidden; white-space: pre; border-right: 1px solid var(--line); }
 .gutter .err { color: var(--down); }
 textarea#script { font: 12.5px/20px var(--font-mono); padding: 10px; background: transparent; border: 0; resize: none; outline: none; white-space: pre; overflow: auto; tab-size: 2; color: var(--fg); min-width: 0; }
+.scriptmeta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; }
+.scriptmeta #scriptName { flex: 1; min-width: 120px; height: 28px; padding: 0 8px; background: var(--code); border: 1px solid var(--line); border-radius: 6px; }
+.scriptmeta label.chk { display: inline-flex; flex-direction: row; align-items: center; gap: 4px; color: var(--mut); }
+#delScript.arm { color: var(--down); border-color: var(--down); }
 .status { font: 12px var(--font-mono); color: var(--mut); min-height: 18px; }
 .status.err { color: var(--down); } .status.ok::before { content: "● "; color: var(--up); }
 .bt-opts { display: flex; gap: 12px; align-items: center; }

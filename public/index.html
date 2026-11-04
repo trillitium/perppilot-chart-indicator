@@ -108,8 +108,15 @@
 
       <section class="pane" data-pane="script" hidden>
         <div class="row-between">
-          <select id="preset" class="ctl" aria-label="Example script"></select>
-          <button id="run" class="ctl primary" title="Run (Ctrl+Enter)">Run ▸</button>
+          <select id="scriptSel" class="ctl" aria-label="Script"></select>
+          <span class="inline"><button id="newScript" class="ctl sm" title="Start a script of your own">+ New</button><button id="run" class="ctl primary" title="Run (Ctrl+Enter)">Run ▸</button></span>
+        </div>
+        <div id="scriptMeta" class="scriptmeta" hidden>
+          <input id="scriptName" placeholder="Script name" aria-label="Script name" maxlength="60">
+          <select id="scriptLang" class="ctl sm" aria-label="Language" title="Chartsmith script, or Pine Script pasted from TradingView"><option value="cs">Chartsmith</option><option value="pine">Pine</option></select>
+          <label class="chk" title="Load this script by itself whenever this symbol is opened"><input type="checkbox" id="scriptPin"> use on <b id="scriptPinSym"></b></label>
+          <button id="delScript" class="ctl sm" type="button">Delete</button>
+          <span id="scriptSaved" class="hint"></span>
         </div>
         <div class="editor">
           <div class="gutter" id="gutter">1</div>
@@ -128,6 +135,8 @@
         <details class="ref">
           <summary>Language reference</summary>
           <dl>
+            <dt>Pine Script</dt><dd>Set the language to <b>Pine</b> and paste a TradingView indicator. <code>ta.*</code> and <code>math.*</code> functions, <code>input.*</code> defaults, <code>plot</code>, <code>hline</code>, <code>alertcondition</code>, <code>plotshape</code>, <code>? :</code>, <code>[a, b, c] = ta.macd / ta.bb / ta.dmi</code> and one-line <code>if</code> bodies are translated. Loops, multi-line blocks, arrays, labels, tables and <code>request.security</code> are not; the error names the Pine line.</dd>
+            <dt>adx diplus diminus (n) · rma · tr() · sum · cum · barssince · nz · na</dt><dd>Also available, for scripts ported from Pine.</dd>
             <dt>x = expr</dt><dd>Name a series. Every value is a series, one number per bar.</dd>
             <dt>x[n]</dt><dd>Value n bars ago.</dd>
             <dt>open high low close volume</dt><dd>Price series. Also <code>hl2</code> <code>hlc3</code> <code>bar</code>.</dd>

@@ -31,6 +31,7 @@ const STATIC = { // signed-in only
   '/style.css': ['public/style.css', 'text/css; charset=utf-8'],
   '/engine.mjs': ['lib/engine.mjs', 'text/javascript; charset=utf-8'],
   '/gridbot.mjs': ['lib/gridbot.mjs', 'text/javascript; charset=utf-8'],
+  '/pine.mjs': ['lib/pine.mjs', 'text/javascript; charset=utf-8'],
 };
 const PUBLIC = { // needed before sign-in (install icon, service worker, auth page styling)
   '/icon.svg': ['public/icon.svg', 'image/svg+xml'],
@@ -205,6 +206,26 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/bots' && M === 'PUT') return json(res, 200, await bots.update(await body(req)));
     if (p === '/api/bots/overview') return json(res, 200, await bots.overview());
     if (p === '/api/bots/test' && M === 'POST') return json(res, 200, await bots.test());
+
+    // saved scripts (the Script tab's library)
+    const cleanScript = (b, prev = {}) => ({
+      name: String(b.name ?? prev.name ?? 'My script').trim().slice(0, 60) || 'My script',
+      lang: ['cs', 'pine'].includes(b.lang) ? b.lang : (prev.lang || 'cs'),
+      src: String(b.src ?? prev.src ?? '').slice(0, 20000),
+      symbols: Array.isArray(b.symbols) ? [...new Set(b.symbols.map(s => data.normalize(String(s))).filter(Boolean))].slice(0, 40) : (prev.symbols || []),
+    });
+    if (p === '/api/scripts' && M === 'GET') return json(res, 200, ws.scripts);
+    if (p === '/api/scripts' && M === 'POST') {
+      if (ws.scripts.length >= 100) throw new Error('Script limit reached (100). Delete some first.');
+      const s = { id: Math.random().toString(36).slice(2, 10), ...cleanScript(await body(req)), created: Date.now(), updated: Date.now() };
+      ws.scripts.push(s); await ws.saveScripts(); return json(res, 201, s);
+    }
+    m = p.match(/^\/api\/scripts\/([\w-]+)$/);
+    if (m && (M === 'PATCH' || M === 'DELETE')) {
+      const s = ws.scripts.find(x => x.id === m[1]); if (!s) return json(res, 404, { error: 'No such script' });
+      if (M === 'DELETE') { ws.scripts = ws.scripts.filter(x => x !== s); await ws.saveScripts(); return json(res, 200, { ok: true }); }
+      Object.assign(s, cleanScript(await body(req), s), { updated: Date.now() }); await ws.saveScripts(); return json(res, 200, s);
+    }
 
     // notification channels
     if (p === '/api/settings' && M === 'GET') return json(res, 200, Object.fromEntries(SETTING_KEYS.map(k => [k, store.settings[k] || ''])));
