@@ -1,0 +1,13 @@
+{
+  "name": "chartsmith",
+  "version": "1.0.0",
+  "description": "Self-hosted charting, scripted indicators, backtests, alerts and news. Free data, no subscriptions.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test"
+  }
+}

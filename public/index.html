@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Chartsmith</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><span>Chart<b>smith</b></span></div>
+    <div class="search">
+      <input id="search" type="search" placeholder="Symbol or name (AAPL, bitcoin, ^GSPC, EURUSD=X)" autocomplete="off" spellcheck="false" aria-label="Search symbols">
+      <ul id="sresults" class="results" role="listbox" hidden></ul>
+    </div>
+    <div class="tfs" id="tfs" role="group" aria-label="Timeframe"></div>
+    <div class="hdr-actions">
+      <button id="addAlert" class="ctl" title="New price alert at the last price">+ Alert</button>
+      <button id="openSettings" class="ctl" title="Notification settings" aria-label="Settings">⚙</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="chart-wrap">
+      <div class="tools" role="toolbar" aria-label="Drawing tools">
+        <button data-tool="" class="tool on" title="Pointer: drag to pan, wheel to zoom (Esc)">↖</button>
+        <button data-tool="h" class="tool" title="Horizontal line (Alt+H)">―</button>
+        <button data-tool="t" class="tool" title="Trend line (Alt+T)">╱</button>
+        <button id="clearDraw" class="tool" title="Remove all drawings on this symbol">⌫</button>
+      </div>
+      <canvas id="chart" aria-label="Price chart"></canvas>
+      <div id="chip" class="chip" hidden></div>
+      <div id="loading" class="loading" hidden>Loading…</div>
+    </div>
+
+    <aside>
+      <nav class="tabs" role="tablist">
+        <button role="tab" data-tab="watch" class="on">Watchlist</button>
+        <button role="tab" data-tab="news">News</button>
+        <button role="tab" data-tab="alerts">Alerts <span id="alertCount" class="count" hidden></span></button>
+        <button role="tab" data-tab="script">Script</button>
+      </nav>
+
+      <section class="pane" data-pane="watch">
+        <div class="row-between"><h2>Watchlist</h2><button id="watchAdd" class="ctl sm">+ Add current</button></div>
+        <ul id="watch" class="watch"></ul>
+        <p class="hint">Stocks, ETFs and indexes from Yahoo Finance, which can be delayed. Crypto from Coinbase in real time. Crypto change is 24h; everything else is vs the prior close.</p>
+      </section>
+
+      <section class="pane" data-pane="news" hidden>
+        <div class="row-between">
+          <h2 id="newsTitle">News</h2>
+          <div class="seg" role="group"><button data-news="sym" class="on">This symbol</button><button data-news="mkt">Market</button></div>
+        </div>
+        <ul id="news" class="news"></ul>
+      </section>
+
+      <section class="pane" data-pane="alerts" hidden>
+        <form id="alertForm" class="card">
+          <h2>New price alert</h2>
+          <div class="grid2">
+            <label>Symbol<input id="afSymbol" readonly></label>
+            <label>When price<select id="afDir"><option value="cross">crosses</option><option value="above">crosses above</option><option value="below">crosses below</option></select></label>
+            <label>Level<input id="afLevel" inputmode="decimal" required></label>
+            <label>Fire<select id="afRepeat"><option value="once">once</option><option value="every">every time</option></select></label>
+          </div>
+          <button class="ctl primary" type="submit">Create alert</button>
+          <p class="hint">Script alerts: write <code>alert "message" when …</code> in the Script tab, then press “Create alert from script”.</p>
+        </form>
+        <h2>Active and past alerts</h2>
+        <ul id="alerts" class="alerts"></ul>
+        <h2>Recent triggers</h2>
+        <ul id="alertLog" class="log"></ul>
+      </section>
+
+      <section class="pane" data-pane="script" hidden>
+        <div class="row-between">
+          <select id="preset" class="ctl" aria-label="Example script"></select>
+          <button id="run" class="ctl primary" title="Run (Ctrl+Enter)">Run ▸</button>
+        </div>
+        <div class="editor">
+          <div class="gutter" id="gutter">1</div>
+          <textarea id="script" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Script editor"></textarea>
+        </div>
+        <div class="status" id="status"></div>
+        <button id="scriptAlert" class="ctl" disabled>Create alert from script</button>
+        <div class="row-between">
+          <h2>Backtest</h2>
+          <div class="bt-opts">
+            <label>Fee % <input id="fee" type="number" min="0" max="2" step="0.01" value="0.05"></label>
+            <label><input id="short" type="checkbox"> shorts</label>
+          </div>
+        </div>
+        <div id="btResults"></div>
+        <details class="ref">
+          <summary>Language reference</summary>
+          <dl>
+            <dt>x = expr</dt><dd>Name a series. Every value is a series, one number per bar.</dd>
+            <dt>x[n]</dt><dd>Value n bars ago.</dd>
+            <dt>open high low close volume</dt><dd>Price series. Also <code>hl2</code> <code>hlc3</code> <code>bar</code>.</dd>
+            <dt>+ - * / &lt; &gt; &lt;= &gt;= == !=</dt><dd>Math and comparisons, bar by bar.</dd>
+            <dt>and or not</dt><dd>Combine conditions.</dd>
+            <dt>sma ema wma (src, n)</dt><dd>Moving averages.</dd>
+            <dt>rsi(src, n)</dt><dd>Relative strength, 0 to 100.</dd>
+            <dt>stdev(src, n)</dt><dd>Rolling standard deviation.</dd>
+            <dt>highest lowest (src, n)</dt><dd>Rolling max and min.</dd>
+            <dt>atr(n)</dt><dd>Average true range.</dd>
+            <dt>vwap()</dt><dd>Volume-weighted average price, resets daily.</dd>
+            <dt>change roc (src, n)</dt><dd>Difference and % change vs n bars ago.</dd>
+            <dt>crossover crossunder cross (a, b)</dt><dd>True on the bar a crosses b.</dd>
+            <dt>iff(cond, a, b)</dt><dd>Pick a or b per bar.</dd>
+            <dt>abs max min</dt><dd>Element-wise helpers.</dd>
+            <dt>plot(x, "label", "#hex")</dt><dd>Draw on the price chart.</dd>
+            <dt>panel(x, "label", "#hex")</dt><dd>Draw in the lower pane.</dd>
+            <dt>columns(x, "label")</dt><dd>Histogram in the lower pane.</dd>
+            <dt>hline(value)</dt><dd>Reference line in the lower pane.</dd>
+            <dt>buy when cond</dt><dd>Go long at the next bar's open.</dd>
+            <dt>sell when cond</dt><dd>Exit (or go short, if shorts is on) at the next bar's open.</dd>
+            <dt>alert "msg" when cond</dt><dd>Push a notification when a bar closes with cond true.</dd>
+            <dt>// note</dt><dd>Comment.</dd>
+          </dl>
+        </details>
+      </section>
+    </aside>
+  </main>
+</div>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<dialog id="settings">
+  <form method="dialog" id="settingsForm">
+    <h2>Where should alerts reach you?</h2>
+    <p class="hint">Pick any. Alerts always show here in the app too. All free.</p>
+    <fieldset>
+      <legend>Phone push via ntfy (easiest)</legend>
+      <p class="hint">Install the free <b>ntfy</b> app (iOS / Android), tap +, and subscribe to the topic below. Keep the topic hard to guess.</p>
+      <label>Topic<span class="inline"><input id="sNtfyTopic" placeholder="chartsmith-xxxxxxxx"><button type="button" id="genTopic" class="ctl sm">Generate</button></span></label>
+      <label>Server<input id="sNtfyServer" placeholder="https://ntfy.sh"></label>
+    </fieldset>
+    <fieldset>
+      <legend>Discord</legend>
+      <label>Webhook URL<input id="sDiscord" placeholder="https://discord.com/api/webhooks/…"></label>
+    </fieldset>
+    <fieldset>
+      <legend>Telegram</legend>
+      <label>Bot token<input id="sTgToken" placeholder="123456:ABC…"></label>
+      <label>Chat ID<input id="sTgChat" placeholder="123456789"></label>
+    </fieldset>
+    <fieldset>
+      <legend>This browser</legend>
+      <button type="button" id="browserNotif" class="ctl sm">Enable desktop notifications</button>
+    </fieldset>
+    <div class="row-between">
+      <span id="settingsMsg" class="hint"></span>
+      <span class="inline">
+        <button type="button" id="testNotify" class="ctl">Send test</button>
+        <button type="button" id="saveSettings" class="ctl primary">Save</button>
+        <button value="close" class="ctl">Close</button>
+      </span>
+    </div>
+  </form>
+</dialog>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>
