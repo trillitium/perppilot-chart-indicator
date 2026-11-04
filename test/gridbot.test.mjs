@@ -55,3 +55,21 @@ test('default bots mirror the indicator inputs', () => {
   assert.deepEqual(GB.activeCoins([heiko]).sort(), ['HYPE', 'SOL', 'xyz:PLTR', 'xyz:TSLA']);
   assert.equal(GB.botsForCoin(GB.DEFAULT_BOTS, 'SOL').length, 1); // Mariluz SOL is off by default
 });
+
+test('range transitions cover below, above, gaps and re-entry', () => {
+  const cfg = { min: 90, max: 100 };
+  const walk = prices => { let st; const ev = []; for (const p of prices) { const r = GB.rangeTransition(st, p, cfg); st = r.state; if (r.event) ev.push(r.event); } return ev; };
+  assert.deepEqual(walk([95, 89, 95, 101, 95]), ['exit', 'reentry', 'above', 'reentry']);
+  assert.deepEqual(walk([95, 101, 102, 103]), ['above']);           // fires once, not every check
+  assert.deepEqual(walk([95, 85, 110, 85]), ['exit', 'above', 'exit']); // gaps straight through the range
+  assert.deepEqual(walk([105, 95]), ['reentry']);                    // first check only records state
+  assert.equal(GB.rangeTransition(true, 101, cfg).event, 'above');  // old boolean state still works
+  assert.equal(GB.rangeTransition(false, 110, cfg).event, null);    // old "out" resolves silently
+  assert.equal(GB.rangeTransition(false, 95, cfg).event, 'reentry');
+});
+
+test('above-MAX message names the bot and the MAX', () => {
+  const m = GB.aboveMessage({ bot: { name: 'Bot-Heiko', mention: '<@1>' }, coin: 'HYPE', price: 97.1, cfg: { min: 78.5, max: 96.8 } });
+  assert.match(m, /^<@1>\n🚀 \*\*AUSBRUCH NACH OBEN: BOT-HEIKO/);
+  assert.match(m, /MAX PRICE: 96\.8 USD/);
+});

@@ -29,7 +29,7 @@ The **Bots** tab is a rebuild of the *PerpPilot V3.1 Dual Bot* TradingView indic
 - **Overview:** every active asset across all bots in one table. (The original had a "Multi-Overview" option it never got to.)
 - **Chart:** EMA 20/50/200, each bot's MIN/MAX lines, and START, EXIT and RE-ENTRY markers through history.
 - **START alert:** EMA 20 > 50 > 200, price above all of them, ADX between 22 and 45, DI+ > DI−, and MACD rising, all held for 2 closed bars on the signal timeframe (1h by default).
-- **RANGE EXIT / RE-ENTRY alerts:** fire as soon as the live Hyperliquid price drops below a bot's MIN, or comes back inside its range.
+- **RANGE EXIT / ABOVE MAX / RE-ENTRY alerts:** fire as soon as the live Hyperliquid price drops below a bot's MIN, breaks out above its MAX (the grid is fully sold and stops earning), or comes back inside its range. ABOVE MAX is new; the original only watched the bottom. Each can be switched off in the settings.
 - **Funding:** pulled live from Hyperliquid every check. Switch to manual in the settings to use a fixed number like the old indicator.
 - **Test:** the **Send test** button sends a START preview right away, like the old "Test-Modus".
 

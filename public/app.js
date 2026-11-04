@@ -733,11 +733,10 @@ function botAnalysis() {
     // replay range exits / re-entries over history, the way the indicator plotted them
     BOT.events = [];
     for (const { cfg, k } of rows) {
-      let was = S.bars[0].c >= cfg.min && S.bars[0].c <= cfg.max;
+      let st;
       S.bars.forEach((b, i) => {
-        const inR = b.c >= cfg.min && b.c <= cfg.max;
-        if (was && b.c < cfg.min) { BOT.events.push({ i, type: 'exit', k }); was = false; }
-        else if (!was && inR) { BOT.events.push({ i, type: 'reentry', k }); was = true; }
+        const r = GB.rangeTransition(st, b.c, cfg); st = r.state;
+        if (r.event) BOT.events.push({ i, type: r.event, k });
       });
     }
   }
@@ -762,6 +761,7 @@ function drawBotOverlay(i0, i1, yOf) {
     if (e.i < i0 || e.i > i1) continue;
     const x = xOf(e.i), b = S.bars[e.i];
     if (e.type === 'exit') { const y = yOf(b.h) - 14; tri(x, y, false, '#ff5d6c'); g.fillStyle = '#ff5d6c'; g.textBaseline = 'bottom'; g.fillText('EXIT', x, y - 7); }
+    else if (e.type === 'above') { const y = yOf(b.h) - 14; tri(x, y, true, '#f2b544'); g.fillStyle = '#f2b544'; g.textBaseline = 'bottom'; g.fillText('ABOVE MAX', x, y - 8); }
     else { const y = yOf(b.l) + 14; g.fillStyle = '#7fd1e8'; g.beginPath(); g.moveTo(x, y - 6); g.lineTo(x + 5, y); g.lineTo(x, y + 6); g.lineTo(x - 5, y); g.closePath(); g.fill(); g.textBaseline = 'top'; g.fillText('RE-ENTRY', x, y + 8); }
   }
 }
@@ -820,7 +820,7 @@ const SETTING_FIELDS = [
   ['adxLen', 'ADX length'], ['adxMin', 'ADX min (trend start)'], ['adxMax', 'ADX max (overheat)'], ['useMacd', 'MACD filter', 'chk'],
   ['macdFast', 'MACD fast'], ['macdSlow', 'MACD slow'], ['macdSignal', 'MACD signal'], ['atrLen', 'ATR length'], ['lowerMult', 'Auto MIN: ATR × (below EMA 50)'], ['upperMult', 'Auto MAX: ATR × (above price)'],
   ['useFunding', 'Include funding', 'chk'], ['fundingMode', 'Funding source', 'select:live,manual'], ['fundingPctHr', 'Manual funding %/h'], ['holdHours', 'Hold hours for funding'],
-  ['startAlerts', 'START alerts', 'chk'], ['exitAlerts', 'EXIT / RE-ENTRY alerts', 'chk'], ['lorisLink', 'Loris funding link', 'chk'],
+  ['startAlerts', 'START alerts', 'chk'], ['exitAlerts', 'EXIT / RE-ENTRY alerts', 'chk'], ['aboveAlerts', 'ABOVE MAX alerts', 'chk'], ['lorisLink', 'Loris funding link', 'chk'],
 ];
 const draft = { cfg: null };
 function renderEditor() {
