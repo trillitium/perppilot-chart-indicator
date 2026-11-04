@@ -55,6 +55,14 @@
       </nav>
 
       <section class="pane" data-pane="watch">
+        <div id="onboard" class="card onboard" hidden>
+          <div class="row-between"><h2>Get set up</h2><button id="onboardHide" class="ctl sm" aria-label="Hide setup checklist">Hide</button></div>
+          <ol>
+            <li data-step="push"><span class="tick" aria-hidden="true"></span><span>Turn on notifications on this device</span><button class="ctl sm" data-go="push">Turn on</button></li>
+            <li data-step="alert"><span class="tick" aria-hidden="true"></span><span>Create your first alert</span><button class="ctl sm" data-go="alert">Add alert</button></li>
+            <li data-step="bots"><span class="tick" aria-hidden="true"></span><span>Set up a grid bot (optional)</span><button class="ctl sm" data-go="bots">Open bots</button></li>
+          </ol>
+        </div>
         <div class="row-between"><h2>Watchlist</h2><button id="watchAdd" class="ctl sm">+ Add current</button></div>
         <ul id="watch" class="watch"></ul>
         <p class="hint">Stocks, ETFs and indexes from Yahoo Finance, which can be delayed. Crypto from Coinbase in real time. Crypto change is 24h; everything else is vs the prior close.</p>
@@ -151,39 +159,93 @@
 
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
-<dialog id="settings">
-  <form method="dialog" id="settingsForm">
-    <h2>Where should alerts reach you?</h2>
-    <p class="hint">Pick any. Alerts always show here in the app too. All free.</p>
+<dialog id="settings" class="wide" aria-label="Settings">
+  <div class="set-head">
+    <nav class="seg" id="setNav" role="tablist">
+      <button data-sp="notif" class="on">Notifications</button><button data-sp="account">Account</button><button data-sp="team" id="teamTab" hidden>Team</button><button data-sp="about">About</button>
+    </nav>
+    <button id="closeSettings" class="ctl sm" aria-label="Close settings">Close</button>
+  </div>
+
+  <section class="sp" data-sp="notif">
     <fieldset>
-      <legend>Phone push via ntfy (easiest)</legend>
-      <p class="hint">Install the free <b>ntfy</b> app (iOS / Android), tap +, and subscribe to the topic below. Keep the topic hard to guess.</p>
-      <label>Topic<span class="inline"><input id="sNtfyTopic" placeholder="chartsmith-xxxxxxxx"><button type="button" id="genTopic" class="ctl sm">Generate</button></span></label>
-      <label>Server<input id="sNtfyServer" placeholder="https://ntfy.sh"></label>
+      <legend>This device</legend>
+      <p id="pushStatus" class="hint"></p>
+      <p id="iosHint" class="hint callout" hidden>On iPhone, notifications work once Chartsmith is on your Home Screen: tap <b>Share</b> → <b>Add to Home Screen</b>, open it from the new icon, then come back here.</p>
+      <div class="inline"><button type="button" id="pushToggle" class="ctl primary sm">Turn on notifications</button></div>
+      <ul id="devices" class="devices"></ul>
     </fieldset>
-    <fieldset>
-      <legend>Discord</legend>
-      <label>Webhook URL<input id="sDiscord" placeholder="https://discord.com/api/webhooks/…"></label>
-    </fieldset>
-    <fieldset>
-      <legend>Telegram</legend>
-      <label>Bot token<input id="sTgToken" placeholder="123456:ABC…"></label>
-      <label>Chat ID<input id="sTgChat" placeholder="123456789"></label>
-    </fieldset>
-    <fieldset>
-      <legend>This browser</legend>
-      <button type="button" id="browserNotif" class="ctl sm">Enable desktop notifications</button>
-    </fieldset>
+    <details class="more">
+      <summary>Also send alerts to ntfy, Discord or Telegram</summary>
+      <fieldset>
+        <legend>ntfy</legend>
+        <p class="hint">Handy for devices that can't install the app. Install <b>ntfy</b>, tap +, subscribe to this topic.</p>
+        <label>Topic<span class="inline"><input id="sNtfyTopic" placeholder="chartsmith-xxxxxxxx"><button type="button" id="genTopic" class="ctl sm">Generate</button></span></label>
+        <label>Server<input id="sNtfyServer" placeholder="https://ntfy.sh"></label>
+      </fieldset>
+      <fieldset>
+        <legend>Discord</legend>
+        <label>Webhook URL<input id="sDiscord" placeholder="https://discord.com/api/webhooks/…"></label>
+      </fieldset>
+      <fieldset>
+        <legend>Telegram</legend>
+        <label>Bot token<input id="sTgToken" placeholder="123456:ABC…"></label>
+        <label>Chat ID<input id="sTgChat" placeholder="123456789"></label>
+      </fieldset>
+      <div class="inline"><button type="button" id="saveSettings" class="ctl sm">Save channels</button></div>
+    </details>
     <div class="row-between">
-      <span id="settingsMsg" class="hint"></span>
-      <span class="inline">
-        <button type="button" id="testNotify" class="ctl">Send test</button>
-        <button type="button" id="saveSettings" class="ctl primary">Save</button>
-        <button value="close" class="ctl">Close</button>
-      </span>
+      <span id="settingsMsg" class="hint" role="status"></span>
+      <button type="button" id="testNotify" class="ctl">Send test notification</button>
     </div>
-  </form>
+  </section>
+
+  <section class="sp" data-sp="account" hidden>
+    <fieldset>
+      <legend>Profile</legend>
+      <label>Name<input id="accName" autocomplete="name"></label>
+      <label>Email<input id="accEmail" readonly></label>
+      <div class="inline"><button type="button" id="saveName" class="ctl sm">Save name</button></div>
+    </fieldset>
+    <fieldset>
+      <legend>Change password</legend>
+      <label>Current password<input id="accCur" type="password" autocomplete="current-password"></label>
+      <label>New password<input id="accNew" type="password" autocomplete="new-password" minlength="8"></label>
+      <div class="inline"><button type="button" id="changePw" class="ctl sm">Change password</button></div>
+      <p class="hint">Changing it signs you out everywhere else.</p>
+    </fieldset>
+    <div class="row-between"><span id="accMsg" class="hint" role="status"></span><a href="/logout" class="ctl linkbtn">Sign out</a></div>
+  </section>
+
+  <section class="sp" data-sp="team" hidden>
+    <fieldset>
+      <legend>Invite someone</legend>
+      <p class="hint">Each code works once. Send the link; they pick their own password.</p>
+      <div class="inline"><button type="button" id="newInvite" class="ctl primary sm">Create invite link</button></div>
+      <ul id="invites" class="devices"></ul>
+    </fieldset>
+    <fieldset>
+      <legend>People</legend>
+      <ul id="people" class="devices"></ul>
+    </fieldset>
+    <p id="teamMsg" class="hint" role="status"></p>
+  </section>
+
+  <section class="sp" data-sp="about" hidden>
+    <p><b>Chartsmith</b> <span id="aboutVer" class="hint"></span></p>
+    <p class="hint">Charts, scripted indicators, backtests, grid-bot monitoring, alerts and news.</p>
+    <dl class="about">
+      <dt>Stocks, ETFs, indexes, forex, futures</dt><dd>Yahoo Finance (may be delayed)</dd>
+      <dt>Crypto</dt><dd>Coinbase, real time</dd>
+      <dt>Hyperliquid perps</dt><dd>Hyperliquid, real time, live funding</dd>
+      <dt>News</dt><dd>Yahoo Finance and Google News</dd>
+    </dl>
+    <p class="hint">Your alerts, bots and settings live only on the server you run; nothing is sent anywhere except the notification channels you turn on.</p>
+    <p class="hint"><b>Not financial advice.</b> Prices can be delayed or wrong. Backtests describe the past, not the future. Trade at your own risk.</p>
+  </section>
 </dialog>
+
+<div id="offline" class="offline" role="status" hidden>You're offline. Showing the last data loaded; alerts keep running on the server.</div>
 
 <dialog id="botsDialog" class="wide">
   <form method="dialog" id="botsForm">

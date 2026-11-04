@@ -10,7 +10,7 @@ const store = {
 async function api(path, opts = {}) {
   const r = await fetch(path, { ...opts, headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) } });
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401) { location.href = '/'; throw new Error('Sign in again'); }
+  if (r.status === 401) { location.href = '/login'; throw new Error('Please sign in again'); }
   if (!r.ok) { const e = new Error(j.error || r.statusText); e.line = j.line; throw e; }
   return j;
 }
@@ -451,7 +451,7 @@ function showTab(t) {
   $$('.pane').forEach(p => p.hidden = p.dataset.pane !== t);
   store.set('tab', t);
   if (t === 'script') drawEquity();
-  if (t === 'bots') loadOverview();
+  if (t === 'bots') { loadOverview(); store.set('botsVisited', true); renderOnboard(); }
 }
 $$('.tabs button').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
 
@@ -555,8 +555,8 @@ $('#alertForm').addEventListener('submit', async e => {
   e.preventDefault();
   try {
     await api('/api/alerts', { method: 'POST', body: JSON.stringify({ symbol: S.symbol, kind: 'price', level: parseFloat($('#afLevel').value), dir: $('#afDir').value, repeat: $('#afRepeat').value }) });
-    toast('Alert created. It runs on the server, so it fires even with this tab closed.');
-    loadAlerts();
+    toast('Alert created. It runs on the server, so it fires even with the app closed.');
+    loadAlerts(); loadMe();
   } catch (err) { toast(err.message, true); }
 });
 $('#scriptAlert').addEventListener('click', async () => {
@@ -677,30 +677,161 @@ function drawEquity() {
 // ---------------------------------------------------------------------------
 const dlg = $('#settings');
 const F = { ntfyTopic: '#sNtfyTopic', ntfyServer: '#sNtfyServer', discordWebhook: '#sDiscord', telegramToken: '#sTgToken', telegramChat: '#sTgChat' };
-$('#openSettings').addEventListener('click', async () => {
-  try { const s = await api('/api/settings'); for (const [k, sel] of Object.entries(F)) $(sel).value = s[k] || ''; } catch {}
-  $('#settingsMsg').textContent = ''; updateNotifBtn(); dlg.showModal();
-});
+let ME = null;
+async function loadMe() { try { ME = await api('/api/me'); } catch { return null; } $('#teamTab').hidden = ME.user.role !== 'owner'; renderOnboard(); return ME; }
+function showSection(k) {
+  $$('#setNav button').forEach(b => b.classList.toggle('on', b.dataset.sp === k));
+  $$('#settings .sp').forEach(x => x.hidden = x.dataset.sp !== k);
+  if (k === 'notif') { renderPush(); renderDevices(); }
+  if (k === 'account' && ME) { $('#accName').value = ME.user.name; $('#accEmail').value = ME.user.email; $('#accMsg').textContent = ''; }
+  if (k === 'team') renderTeam();
+  if (k === 'about' && ME) $('#aboutVer').textContent = 'version ' + ME.version;
+}
+$$('#setNav button').forEach(b => b.addEventListener('click', () => showSection(b.dataset.sp)));
+async function openSettings(section = 'notif') {
+  await loadMe();
+  try { const st = await api('/api/settings'); for (const [k, sel] of Object.entries(F)) $(sel).value = st[k] || ''; } catch {}
+  $('#settingsMsg').textContent = ''; showSection(section); if (!dlg.open) dlg.showModal();
+}
+$('#openSettings').addEventListener('click', () => openSettings());
+$('#closeSettings').addEventListener('click', () => dlg.close());
 $('#genTopic').addEventListener('click', () => { $('#sNtfyTopic').value = 'chartsmith-' + crypto.getRandomValues(new Uint32Array(2)).reduce((s, n) => s + n.toString(36), ''); });
 async function saveSettings() {
   const body = {}; for (const [k, sel] of Object.entries(F)) body[k] = $(sel).value.trim();
   await api('/api/settings', { method: 'PUT', body: JSON.stringify(body) });
 }
-$('#saveSettings').addEventListener('click', async () => { try { await saveSettings(); $('#settingsMsg').textContent = 'Saved.'; } catch (e) { $('#settingsMsg').textContent = e.message; } });
+$('#saveSettings').addEventListener('click', async () => { try { await saveSettings(); $('#settingsMsg').textContent = 'Channels saved.'; loadMe(); } catch (e) { $('#settingsMsg').textContent = e.message; } });
 $('#testNotify').addEventListener('click', async () => {
   try {
-    await saveSettings(); const r = await api('/api/test-notify', { method: 'POST' });
+    const r = await api('/api/test-notify', { method: 'POST' });
     const parts = Object.entries(r).map(([k, v]) => `${k}: ${v}`);
-    $('#settingsMsg').textContent = parts.length ? parts.join(' · ') : 'Sent in-app only. Add a channel above for your phone.';
+    $('#settingsMsg').textContent = parts.length ? 'Sent → ' + parts.join(' · ') : 'Shown here only. Turn on notifications above to get them on this device.';
   } catch (e) { $('#settingsMsg').textContent = e.message; }
 });
-function updateNotifBtn() {
-  const b = $('#browserNotif');
-  if (!('Notification' in window)) { b.disabled = true; b.textContent = 'Not supported in this browser'; return; }
-  b.textContent = Notification.permission === 'granted' ? 'Desktop notifications are on' : Notification.permission === 'denied' ? 'Blocked in browser settings' : 'Enable desktop notifications';
-  b.disabled = Notification.permission !== 'default';
+
+// ---- push notifications on this device ----
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && isSecureContext;
+function deviceLabel() {
+  const ua = navigator.userAgent;
+  const dev = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) || (isIOS && !/iPhone/.test(ua)) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows PC' : /Linux/.test(ua) ? 'Linux' : 'Device';
+  const br = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /CriOS|Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : '';
+  return `${dev}${standalone() ? ' app' : br ? ' · ' + br : ''}`;
 }
-$('#browserNotif').addEventListener('click', async () => { try { await Notification.requestPermission(); } catch {} updateNotifBtn(); });
+const keyBytes = b64 => { const s = atob(b64.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((b64.length + 3) % 4)); return Uint8Array.from(s, c => c.charCodeAt(0)); };
+async function currentSub() { if (!pushSupported()) return null; const reg = await navigator.serviceWorker.getRegistration(); return reg ? reg.pushManager.getSubscription() : null; }
+async function renderPush() {
+  const st = $('#pushStatus'), btn = $('#pushToggle');
+  $('#iosHint').hidden = !(isIOS && !standalone());
+  if (isIOS && !standalone()) { btn.hidden = true; st.textContent = ''; return; } // iPhone/iPad: push only works from the Home Screen app
+  if (!pushSupported()) {
+    btn.hidden = true;
+    st.textContent = !isSecureContext ? 'Notifications need the https:// address of your Chartsmith server. On this local copy alerts show inside the app while it is open.'
+      : isIOS && !standalone() ? '' : 'This browser can’t receive notifications. Try Chrome, Edge, Firefox or Safari 16.4+.';
+    return;
+  }
+  btn.hidden = false;
+  const sub = await currentSub();
+  if (Notification.permission === 'denied') { st.textContent = 'Notifications are blocked for this site. Allow them in the browser’s site settings, then reload.'; btn.hidden = true; return; }
+  st.textContent = sub ? `On. Alerts pop up on this ${deviceLabel().split(' ')[0]} even when Chartsmith is closed.` : 'Off on this device.';
+  btn.textContent = sub ? 'Turn off on this device' : 'Turn on notifications'; btn.classList.toggle('primary', !sub);
+}
+async function enablePush() {
+  if (!pushSupported()) { openSettings('notif'); return false; }
+  if (!ME) await loadMe();
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') { toast('Notifications weren’t allowed. You can change that in the browser’s site settings.', true); renderPush(); return false; }
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription() || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(ME.pushKey) });
+  await api('/api/devices', { method: 'POST', body: JSON.stringify({ ...sub.toJSON(), label: deviceLabel() }) });
+  store.set('pushOn', true); toast('Notifications are on for this device'); await loadMe(); renderPush(); renderDevices();
+  return true;
+}
+async function disablePush() {
+  const sub = await currentSub();
+  if (sub) { await api('/api/devices/remove', { method: 'POST', body: JSON.stringify({ endpoint: sub.endpoint }) }).catch(() => {}); await sub.unsubscribe(); }
+  store.set('pushOn', false); await loadMe(); renderPush(); renderDevices();
+}
+$('#pushToggle').addEventListener('click', async e => {
+  e.target.disabled = true;
+  try { (await currentSub()) ? await disablePush() : await enablePush(); } catch (err) { toast('Couldn’t change notifications: ' + err.message, true); }
+  finally { e.target.disabled = false; }
+});
+async function renderDevices() {
+  const ul = $('#devices');
+  try {
+    const list = await api('/api/devices'), mine = await currentSub().catch(() => null);
+    ul.innerHTML = list.length ? list.map(d => `<li><span>${esc(d.label)}<small>added ${ago(d.created)}${d.lastOk ? ' · last delivered ' + ago(d.lastOk) : ''}</small></span><button class="ctl sm" data-rmdev="${d.i}">Remove</button></li>`).join('')
+      : '<li class="hint">No devices get notifications yet.</li>';
+    void mine;
+  } catch { ul.innerHTML = ''; }
+}
+$('#devices').addEventListener('click', async e => {
+  const i = e.target.dataset.rmdev; if (i == null) return;
+  await api('/api/devices/remove', { method: 'POST', body: JSON.stringify({ i: +i }) }); renderDevices(); renderPush(); loadMe();
+});
+
+// ---- account ----
+$('#saveName').addEventListener('click', async () => { try { await api('/api/account', { method: 'PUT', body: JSON.stringify({ name: $('#accName').value }) }); $('#accMsg').textContent = 'Saved.'; loadMe(); } catch (e) { $('#accMsg').textContent = e.message; } });
+$('#changePw').addEventListener('click', async () => {
+  try {
+    await api('/api/account', { method: 'PUT', body: JSON.stringify({ currentPassword: $('#accCur').value, newPassword: $('#accNew').value }) });
+    $('#accCur').value = $('#accNew').value = ''; $('#accMsg').textContent = 'Password changed. Other devices are signed out.';
+  } catch (e) { $('#accMsg').textContent = e.message; }
+});
+
+// ---- team (owner) ----
+async function renderTeam() {
+  try {
+    const t = await api('/api/team');
+    const link = c => `${location.origin}/signup?invite=${c}`;
+    $('#invites').innerHTML = t.invites.length ? t.invites.map(i => `<li><span><code>${esc(i.code)}</code><small>${esc(link(i.code))}</small></span><span class="inline"><button class="ctl sm" data-copy="${esc(link(i.code))}">Copy link</button><button class="ctl sm" data-rminv="${esc(i.code)}">Delete</button></span></li>`).join('')
+      : '<li class="hint">No open invites.</li>';
+    $('#people').innerHTML = t.users.map(u => `<li><span>${esc(u.name)} <span class="hint">${esc(u.email)}</span><small>${u.role === 'owner' ? 'Owner' : 'Member'} · joined ${ago(u.created)}</small></span>${u.id === ME.user.id ? '' : `<span class="inline"><button class="ctl sm" data-reset="${u.id}">Reset password</button><button class="ctl sm" data-rmuser="${u.id}">Remove</button></span>`}</li>`).join('');
+  } catch (e) { $('#teamMsg').textContent = e.message; }
+}
+$('#newInvite').addEventListener('click', async () => { try { const { code } = await api('/api/invites', { method: 'POST', body: '{}' }); await renderTeam(); copyText(`${location.origin}/signup?invite=${code}`, 'Invite link copied'); } catch (e) { $('#teamMsg').textContent = e.message; } });
+const armed = new Set(); // two-tap confirm for destructive actions (no browser confirm dialogs)
+$('#settings').addEventListener('click', async e => {
+  const d = e.target.dataset;
+  try {
+    if (d.copy) copyText(d.copy, 'Link copied');
+    if (d.rminv) { await api('/api/invites/' + d.rminv, { method: 'DELETE' }); renderTeam(); }
+    if (d.reset || d.rmuser) {
+      const key = (d.reset ? 'r' : 'x') + (d.reset || d.rmuser);
+      if (!armed.has(key)) { armed.add(key); e.target.textContent = 'Tap again to confirm'; setTimeout(() => { armed.delete(key); renderTeam(); }, 4000); return; }
+      armed.delete(key);
+      if (d.reset) { const { tempPassword } = await api(`/api/users/${d.reset}/reset`, { method: 'POST', body: '{}' }); $('#teamMsg').innerHTML = `Temporary password: <code>${esc(tempPassword)}</code>. Send it to them; they can change it under Account.`; }
+      else { await api('/api/users/' + d.rmuser, { method: 'DELETE' }); $('#teamMsg').textContent = 'Removed.'; }
+      renderTeam();
+    }
+  } catch (err) { $('#teamMsg').textContent = err.message; }
+});
+function copyText(text, msg) {
+  navigator.clipboard.writeText(text).then(() => toast(msg), () => toast(text, false, 'Copy this link'));
+}
+
+// ---- onboarding checklist ----
+async function renderOnboard() {
+  const box = $('#onboard'); if (!ME || store.get('onboardHidden', false)) { box.hidden = true; return; }
+  const pushOn = !!(await currentSub().catch(() => null)) || ME.devices > 0;
+  const done = { push: pushOn || ME.channels, alert: ME.alerts > 0, bots: !!store.get('botsVisited', false) };
+  $$('#onboard li').forEach(li => li.classList.toggle('done', !!done[li.dataset.step]));
+  box.hidden = Object.values(done).every(Boolean);
+}
+$('#onboard').addEventListener('click', e => {
+  const go = e.target.dataset.go;
+  if (go === 'push') { if (isIOS && !standalone()) openSettings('notif'); else enablePush().catch(err => toast(err.message, true)); }
+  if (go === 'alert') openPriceAlert();
+  if (go === 'bots') showTab('bots');
+});
+$('#onboardHide').addEventListener('click', () => { store.set('onboardHidden', true); $('#onboard').hidden = true; });
+
+// ---- offline banner & update prompt ----
+const setOnline = () => { $('#offline').hidden = navigator.onLine; };
+addEventListener('online', () => { setOnline(); load(S.symbol, S.tf, { keepView: true }); });
+addEventListener('offline', setOnline); setOnline();
 
 function toast(msg, err = false, sub = '', onClick) {
   const t = document.createElement('div'); t.className = 'toast' + (err ? ' err' : '');
@@ -883,8 +1014,22 @@ $('#saveBots').addEventListener('click', async () => {
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
+function openLink(href) {
+  const u = new URL(href, location.origin), sym = u.searchParams.get('s'), tf = u.searchParams.get('tf');
+  if (sym) { if (TF.includes(tf)) S.tf = tf; load(sym, S.tf); }
+}
+{ // opened from a notification or a shared link: /?s=HL:SOL&tf=1h
+  const qs = new URLSearchParams(location.search), sym = qs.get('s'), tf = qs.get('tf');
+  if (sym) { S.symbol = sym; if (TF.includes(tf)) S.tf = tf; history.replaceState(null, '', '/'); }
+}
 markTf(); updateGutter(); renderWatch(); showTab(store.get('tab', 'watch'));
 load(S.symbol, S.tf);
 refreshQuotes(); loadAlerts(); loadLog(); listen(); loadBots().then(loadOverview);
 window.__cs = { S, load, runNow };
-if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('/sw.js').catch(() => {});
+if ('serviceWorker' in navigator && isSecureContext) {
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('/sw.js').then(reg => setInterval(() => reg.update().catch(() => {}), 30 * 60e3)).catch(() => {});
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) toast('Chartsmith was updated', false, 'Tap to reload', () => location.reload()); });
+  navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.type === 'open') openLink(e.data.url); });
+}
+loadMe();

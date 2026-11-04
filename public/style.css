@@ -165,3 +165,25 @@ dialog.wide { width: min(860px, calc(100vw - 32px)); max-height: calc(100vh - 48
 .dash table { font-size: 11.5px; }
 .dash td, .dash th { white-space: normal; padding: 5px 6px; }
 .dash td:first-child { white-space: nowrap; }
+
+/* settings / account / app chrome */
+.set-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.sp { display: flex; flex-direction: column; gap: 12px; }
+.callout { background: rgba(242,181,68,.08); border: 1px solid rgba(242,181,68,.3); border-radius: 6px; padding: 8px 10px; color: var(--fg); }
+.devices { list-style: none; margin: 0; padding: 0; }
+.devices li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.devices li small { display: block; color: var(--mut); font-size: 11.5px; }
+.devices li > span { min-width: 0; overflow-wrap: anywhere; }
+.more summary { cursor: pointer; color: var(--mut); font-size: 13px; padding: 4px 0; }
+.more[open] { display: flex; flex-direction: column; gap: 10px; }
+.linkbtn { display: inline-flex; align-items: center; text-decoration: none; color: var(--down); }
+.about { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 13px; margin: 0; }
+.about dt { color: var(--mut); } .about dd { margin: 0; }
+.onboard ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.onboard li { display: grid; grid-template-columns: 20px 1fr auto; gap: 8px; align-items: center; font-size: 13.5px; }
+.onboard .tick { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--mut); }
+.onboard li.done .tick { background: var(--up); border-color: var(--up); }
+.onboard li.done span:nth-child(2) { color: var(--mut); text-decoration: line-through; }
+.onboard li.done button { display: none; }
+.offline { position: fixed; z-index: 60; left: 50%; transform: translateX(-50%); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); background: #3a2a0c; color: #ffd78a; border: 1px solid #6b4e16; border-radius: 8px; padding: 8px 14px; font-size: 13px; max-width: calc(100vw - 32px); }
+@media (max-width: 900px) { .tabs { position: sticky; top: 0; z-index: 8; background: var(--panel); } }
