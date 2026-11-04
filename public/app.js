@@ -1000,6 +1000,15 @@ $('#botsEditor').addEventListener('click', e => {
   if ('adda' in d) draft.cfg.bots[+d.adda].assets.push({ coin: '', pool: 500, min: 0, max: 0, fee: 0.15, active: false });
   if ('rma' in d) draft.cfg.bots[+t.closest('.botcard').dataset.k].assets.splice(+d.rma, 1);
   renderEditor();
+  if ('adda' in d) { // the table scrolls, so bring the new row into view and put the cursor in it
+    const inp = $(`#botsEditor .botcard[data-k="${+d.adda}"] tr[data-j="${draft.cfg.bots[+d.adda].assets.length - 1}"] [data-a="coin"]`);
+    if (inp) { inp.scrollIntoView({ block: 'nearest' }); inp.focus(); }
+  }
+});
+$('#closeBots').addEventListener('click', () => $('#botsDialog').close());
+$('#botsForm').addEventListener('submit', e => e.preventDefault());
+$('#botsForm').addEventListener('keydown', e => { // Enter / Go just leaves the field (dismisses the phone keyboard); it never closes the dialog
+  if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') { e.preventDefault(); e.target.blur(); }
 });
 $('#addBot').addEventListener('click', () => { collect(); draft.cfg.bots.push({ name: 'Bot ' + (draft.cfg.bots.length + 1), mention: '', assets: [] }); renderEditor(); });
 $('#saveBots').addEventListener('click', async () => {
@@ -1007,8 +1016,9 @@ $('#saveBots').addEventListener('click', async () => {
   try {
     BOT.cfg = await api('/api/bots', { method: 'PUT', body: JSON.stringify(draft.cfg) });
     draft.cfg = structuredClone(BOT.cfg); BOT.key = ''; $('#botsMsg').textContent = 'Saved. The server is watching the new setup.';
+    renderEditor(); toast('Bots saved', false, 'The server is watching the new setup');
     draw(); loadOverview();
-  } catch (e) { $('#botsMsg').textContent = e.message; }
+  } catch (e) { $('#botsMsg').textContent = e.message; toast(e.message, true); }
 });
 
 // ---------------------------------------------------------------------------

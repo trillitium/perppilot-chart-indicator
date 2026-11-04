@@ -1,6 +1,6 @@
 {
   "name": "chartsmith",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Self-hosted charting, scripted indicators, backtests, alerts and news. Free data, no subscriptions.",
   "type": "module",
   "private": true,
