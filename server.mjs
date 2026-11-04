@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { timingSafeEqual } from 'node:crypto';
 import * as data from './lib/providers.mjs';
 import { AlertStore, notify } from './lib/alerts.mjs';
+import { BotMonitor } from './lib/botmonitor.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = +process.env.PORT || 8787;
@@ -20,12 +21,15 @@ if (HOST !== '127.0.0.1' && HOST !== 'localhost' && !PASSWORD)
 
 const store = new AlertStore(process.env.DATA_DIR || path.join(ROOT, 'data'));
 await store.load();
+const bots = new BotMonitor(store.dir, store);
+await bots.load();
 
 const STATIC = {
   '/': ['public/index.html', 'text/html; charset=utf-8'],
   '/app.js': ['public/app.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['public/style.css', 'text/css; charset=utf-8'],
   '/engine.mjs': ['lib/engine.mjs', 'text/javascript; charset=utf-8'],
+  '/gridbot.mjs': ['lib/gridbot.mjs', 'text/javascript; charset=utf-8'],
   '/icon.svg': ['public/icon.svg', 'image/svg+xml'],
 };
 
@@ -69,6 +73,10 @@ const server = http.createServer(async (req, res) => {
     if (m && req.method === 'DELETE') { await store.remove(m[1]); return json(res, 200, { ok: true }); }
     if (p === '/api/alert-log') return json(res, 200, store.log.slice(0, 100));
 
+    if (p === '/api/bots' && req.method === 'GET') return json(res, 200, bots.cfg);
+    if (p === '/api/bots' && req.method === 'PUT') return json(res, 200, await bots.update(await body(req)));
+    if (p === '/api/bots/overview') return json(res, 200, await bots.overview());
+    if (p === '/api/bots/test' && req.method === 'POST') return json(res, 200, await bots.test());
     if (p === '/api/settings' && req.method === 'GET') return json(res, 200, Object.fromEntries(SETTING_KEYS.map(k => [k, store.settings[k] || ''])));
     if (p === '/api/settings' && req.method === 'PUT') {
       const b = await body(req); for (const k of SETTING_KEYS) if (k in b) store.settings[k] = String(b[k] || '').trim();
@@ -94,6 +102,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 let running = false;
-setInterval(async () => { if (running) return; running = true; try { await store.check(); } finally { running = false; } }, CHECK_MS);
+setInterval(async () => { if (running) return; running = true; try { await store.check(); await bots.check(); } catch (e) { console.warn('[check]', e.message); } finally { running = false; } }, CHECK_MS);
 
 server.listen(PORT, HOST, () => console.log(`Chartsmith running at http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}  (alerts checked every ${CHECK_MS / 1000}s)`));

@@ -44,6 +44,7 @@
         <button role="tab" data-tab="news">News</button>
         <button role="tab" data-tab="alerts">Alerts <span id="alertCount" class="count" hidden></span></button>
         <button role="tab" data-tab="script">Script</button>
+        <button role="tab" data-tab="bots">Bots</button>
       </nav>
 
       <section class="pane" data-pane="watch">
@@ -76,6 +77,17 @@
         <ul id="alerts" class="alerts"></ul>
         <h2>Recent triggers</h2>
         <ul id="alertLog" class="log"></ul>
+      </section>
+
+      <section class="pane" data-pane="bots" hidden>
+        <div class="row-between">
+          <h2>Grid bots · Hyperliquid</h2>
+          <span class="inline"><button id="botTest" class="ctl sm" title="Send a START message preview to your channels now">Send test</button><button id="botEdit" class="ctl sm primary">Edit bots</button></span>
+        </div>
+        <div id="botDash"></div>
+        <div class="row-between"><h2>All active assets</h2><span id="botUpdated" class="hint"></span></div>
+        <div id="botOverview" class="trades tall"></div>
+        <p class="hint">START = trend confirmed (EMA 20 &gt; 50 &gt; 200, ADX in window, DI+ &gt; DI−, MACD up) for the set number of closed bars. RANGE EXIT fires the moment the live price drops below a bot's MIN; RE-ENTRY when it's back inside. Funding comes live from Hyperliquid. All of it runs on the server, so Discord and phone alerts arrive with this tab closed.</p>
       </section>
 
       <section class="pane" data-pane="script" hidden>
@@ -162,6 +174,17 @@
         <button type="button" id="saveSettings" class="ctl primary">Save</button>
         <button value="close" class="ctl">Close</button>
       </span>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="botsDialog" class="wide">
+  <form method="dialog" id="botsForm">
+    <div class="row-between"><h2>Edit grid bots</h2><span id="botsMsg" class="hint"></span></div>
+    <div id="botsEditor"></div>
+    <div class="row-between">
+      <button type="button" id="addBot" class="ctl sm">+ Add bot</button>
+      <span class="inline"><button type="button" id="saveBots" class="ctl primary">Save</button><button value="close" class="ctl">Close</button></span>
     </div>
   </form>
 </dialog>

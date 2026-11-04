@@ -18,6 +18,22 @@ You run it on your computer (or a $5 server) and open it in a browser.
 | Backtesting | Long and short, fees, win rate, drawdown, profit factor, equity curve, trade list |
 | Watchlist | Live prices and daily change |
 | News | Headlines for the symbol you're on, or the whole market |
+| Grid bots | Rebuilt PerpPilot dual-bot monitor for Hyperliquid: per-bot ranges, 12-level ladder maths, live funding, START / RANGE EXIT / RE-ENTRY alerts to Discord |
+
+## Grid bots (PerpPilot)
+
+The **Bots** tab is a rebuild of the *PerpPilot V3.1 Dual Bot* TradingView indicator, with the same logic and the same Discord message layout.
+
+- **Bots and assets:** any number of bots, each with its own assets (`SOL`, `HYPE`, `xyz:TSLA`…) and its own pool, MIN–MAX range and fee. It starts with the values from the original indicator. Press **Edit bots** to change them.
+- **Dashboard:** pool, MAX/MIN with distance from price, span, net per turnaround after fee and funding, ladder step, funding, ADX state, and whether price is in range. One column per bot.
+- **Overview:** every active asset across all bots in one table. (The original had a "Multi-Overview" option it never got to.)
+- **Chart:** EMA 20/50/200, each bot's MIN/MAX lines, and START, EXIT and RE-ENTRY markers through history.
+- **START alert:** EMA 20 > 50 > 200, price above all of them, ADX between 22 and 45, DI+ > DI−, and MACD rising, all held for 2 closed bars on the signal timeframe (1h by default).
+- **RANGE EXIT / RE-ENTRY alerts:** fire as soon as the live Hyperliquid price drops below a bot's MIN, or comes back inside its range.
+- **Funding:** pulled live from Hyperliquid every check. Switch to manual in the settings to use a fixed number like the old indicator.
+- **Test:** the **Send test** button sends a START preview right away, like the old "Test-Modus".
+
+For Discord pings that actually notify someone, put a real mention in a bot's *Discord mention line*. That's `<@USER_ID>` for a person or `<@&ROLE_ID>` for a role. Plain `@name` text shows up but doesn't ping.
 
 ## Setup (10 minutes)
 
@@ -75,6 +91,7 @@ Full reference is in the app (Script tab → Language reference).
 
 - **Stocks, ETFs, indexes, forex, futures:** Yahoo Finance's public chart feed. It's unofficial and can be delayed (often 15 min for some exchanges). Fine for swing trading and alerts; don't scalp off it.
 - **Crypto:** Coinbase's public API, real time.
+- **Hyperliquid perps** (`HL:SOL`, `HL:xyz:TSLA`): Hyperliquid's public API, real time, including live funding.
 - **News:** Yahoo Finance and Google News RSS.
 
 None need an API key. If Yahoo ever blocks or changes its feed, the fix goes in `lib/providers.mjs`.
@@ -90,6 +107,8 @@ server.mjs          HTTP server, API routes, alert loop
 lib/engine.mjs      Script language + indicators + backtester (shared by browser and server)
 lib/providers.mjs   Yahoo / Coinbase / news adapters with caching
 lib/alerts.mjs      Alert storage, checking, notifications
+lib/gridbot.mjs     PerpPilot logic: indicators, ladder maths, Discord messages (shared)
+lib/botmonitor.mjs  Server-side grid-bot watcher
 public/             The app (index.html, app.js, style.css)
 test/               npm test
 ```

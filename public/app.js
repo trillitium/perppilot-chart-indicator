@@ -1,5 +1,6 @@
 // Chartsmith front end. Talks to server.mjs; the script engine is shared with the server.
 import { runScript, backtest, PRESETS, ScriptError, ok, truthy } from '/engine.mjs';
+import * as GB from '/gridbot.mjs';
 
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const store = {
@@ -25,7 +26,7 @@ const S = {
   symbol: store.get('symbol', 'CB:BTC-USD'), tf: store.get('tf', '1D'),
   meta: {}, bars: [], out: null, bt: null, decimals: 2,
   drawings: store.get('drawings', {}), tool: '', pending: null, selected: -1,
-  watch: store.get('watch', ['^GSPC', '^IXIC', 'SPY', 'AAPL', 'NVDA', 'TSLA', 'CB:BTC-USD', 'CB:ETH-USD', 'CB:SOL-USD']),
+  watch: store.get('watch', ['HL:SOL', 'HL:HYPE', 'HL:BTC', 'HL:xyz:TSLA', 'HL:xyz:PLTR', '^GSPC', 'SPY', 'NVDA', 'CB:ETH-USD']),
   newsMode: 'sym',
 };
 const draws = () => (S.drawings[S.symbol] ||= []);
@@ -158,6 +159,7 @@ function draw() {
     if (barW >= 3) g.fillRect(x - bw / 2 + .5, Math.min(yo, yc), bw, Math.max(1, Math.abs(yc - yo))); else g.fillRect(x, Math.min(yo, yc), 1, Math.max(1, Math.abs(yc - yo)));
   }
   for (const p of plots) if (p.where === 'overlay') line(p.arr, p.color, i0, i1, yOf);
+  drawBotOverlay(i0, i1, yOf);
   if (S.bt) for (const t of [...S.bt.trades, ...(S.bt.open ? [S.bt.open] : [])]) { marker(t.inI, t.side > 0); if (t.outI != null) marker(t.outI, t.side < 0); }
   function marker(i, isBuy) {
     if (i < i0 || i > i1) return;
@@ -382,14 +384,14 @@ async function load(symbol, tf, { keepView = false } = {}) {
     if (seq !== loadSeq) return;
     const changed = symbol !== S.symbol || tf !== S.tf;
     const atEnd = right >= S.bars.length - 2, grew = d.bars.length - S.bars.length;
-    S.symbol = d.symbol; S.tf = tf; S.meta = d; S.bars = d.bars;
+    S.symbol = d.symbol; S.tf = tf; S.meta = d; S.bars = d.bars; markTf();
     store.set('symbol', S.symbol); store.set('tf', S.tf);
     setDecimals();
     if (!keepView || changed) { S.selected = -1; resetView(); } else if (atEnd && grew > 0 && grew < 5) right += grew;
     document.title = `${display(S.symbol)} ${fmt(S.bars[S.bars.length - 1].c)} · Chartsmith`;
     $('#afSymbol').value = display(S.symbol);
     runNow(true);
-    if (changed || !keepView) { renderWatch(); loadNews(); }
+    if (changed || !keepView) { renderWatch(); loadNews(); renderBotDash(); }
   } catch (e) {
     if (seq === loadSeq) toast(`Couldn't load ${display(symbol)}: ${e.message}`, true);
   } finally { if (seq === loadSeq) $('#loading').hidden = true; }
@@ -448,6 +450,7 @@ function showTab(t) {
   $$('.pane').forEach(p => p.hidden = p.dataset.pane !== t);
   store.set('tab', t);
   if (t === 'script') drawEquity();
+  if (t === 'bots') loadOverview();
 }
 $$('.tabs button').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
 
@@ -706,9 +709,180 @@ function toast(msg, err = false, sub = '', onClick) {
 }
 
 // ---------------------------------------------------------------------------
+// Grid bots (PerpPilot port)
+// ---------------------------------------------------------------------------
+const BOT = { cfg: null, ov: null, key: '', ind: null, events: [] };
+const BOT_COL = [['#2fd39a', '#ff5d6c'], ['#7fd1e8', '#e879f9'], ['#f2b544', '#ff8a5c'], ['#a3e635', '#f472b6']];
+const curCoin = () => S.symbol.startsWith('HL:') ? GB.coinOf(S.symbol) : null;
+const curBotRows = () => (BOT.cfg && curCoin()) ? GB.botsForCoin(BOT.cfg.bots, curCoin()) : [];
+async function loadBots() { try { BOT.cfg = await api('/api/bots'); BOT.key = ''; } catch (e) { return; } draw(); renderBotDash(); }
+let ovBusy = false;
+async function loadOverview() {
+  if (ovBusy) return; ovBusy = true;
+  try { BOT.ov = await api('/api/bots/overview'); $('#botUpdated').textContent = 'updated ' + new Date().toLocaleTimeString(); renderOverview(); renderBotDash(); }
+  catch (e) { $('#botOverview').innerHTML = `<p class="hint">Couldn't load bots: ${esc(e.message)}</p>`; }
+  finally { ovBusy = false; }
+}
+setInterval(() => { if (!document.hidden && (store.get('tab') === 'bots' || curCoin())) loadOverview(); }, 20000);
+
+function botAnalysis() {
+  const rows = curBotRows(); if (!rows.length || !S.bars.length) return null;
+  const key = S.symbol + S.tf + S.bars.length + S.bars[S.bars.length - 1].c + JSON.stringify(BOT.cfg);
+  if (BOT.key !== key) {
+    BOT.key = key; BOT.ind = GB.indicators(S.bars, BOT.cfg.settings);
+    // replay range exits / re-entries over history, the way the indicator plotted them
+    BOT.events = [];
+    for (const { cfg, k } of rows) {
+      let was = S.bars[0].c >= cfg.min && S.bars[0].c <= cfg.max;
+      S.bars.forEach((b, i) => {
+        const inR = b.c >= cfg.min && b.c <= cfg.max;
+        if (was && b.c < cfg.min) { BOT.events.push({ i, type: 'exit', k }); was = false; }
+        else if (!was && inR) { BOT.events.push({ i, type: 'reentry', k }); was = true; }
+      });
+    }
+  }
+  return { rows, ind: BOT.ind };
+}
+function drawBotOverlay(i0, i1, yOf) {
+  const a = botAnalysis(); if (!a) return;
+  const { rows, ind } = a, pw = plotW();
+  line(ind.fast, '#2dd4bf', i0, i1, yOf); line(ind.slow, '#fb923c', i0, i1, yOf); line(ind.trend, '#3b82f6', i0, i1, yOf);
+  g.font = '10px ' + C.mono; g.textAlign = 'left'; g.textBaseline = 'bottom';
+  for (const { bot, cfg, k } of rows) {
+    const [cMax, cMin] = BOT_COL[k % BOT_COL.length];
+    for (const [v, c, lab] of [[cfg.max, cMax, 'MAX'], [cfg.min, cMin, 'MIN']]) {
+      const y = Math.round(yOf(v)) + .5; g.strokeStyle = c; g.setLineDash([6, 4]); g.beginPath(); g.moveTo(0, y); g.lineTo(pw, y); g.stroke(); g.setLineDash([]);
+      g.fillStyle = c; g.textAlign = 'right'; g.fillText(`${bot.name} ${lab} ${fmt(v)}`, pw - 6, y - 2); g.textAlign = 'left';
+    }
+  }
+  const tri = (x, y, up, col) => { g.fillStyle = col; g.beginPath(); if (up) { g.moveTo(x, y - 6); g.lineTo(x + 6, y + 5); g.lineTo(x - 6, y + 5); } else { g.moveTo(x, y + 6); g.lineTo(x + 6, y - 5); g.lineTo(x - 6, y - 5); } g.closePath(); g.fill(); };
+  g.textAlign = 'center';
+  for (let i = i0; i <= i1; i++) if (ind.start[i]) { const x = xOf(i), y = yOf(S.bars[i].l) + 14; tri(x, y, true, '#2fd39a'); g.fillStyle = '#2fd39a'; g.textBaseline = 'top'; g.fillText('START', x, y + 7); }
+  for (const e of BOT.events) {
+    if (e.i < i0 || e.i > i1) continue;
+    const x = xOf(e.i), b = S.bars[e.i];
+    if (e.type === 'exit') { const y = yOf(b.h) - 14; tri(x, y, false, '#ff5d6c'); g.fillStyle = '#ff5d6c'; g.textBaseline = 'bottom'; g.fillText('EXIT', x, y - 7); }
+    else { const y = yOf(b.l) + 14; g.fillStyle = '#7fd1e8'; g.beginPath(); g.moveTo(x, y - 6); g.lineTo(x + 5, y); g.lineTo(x, y + 6); g.lineTo(x - 5, y); g.closePath(); g.fill(); g.textBaseline = 'top'; g.fillText('RE-ENTRY', x, y + 8); }
+  }
+}
+
+const sign = v => (v > 0 ? '+' : '') + v.toFixed(2);
+const usd = v => '$' + Math.round(v).toLocaleString('en-US');
+function renderBotDash() {
+  const box = $('#botDash'), coin = curCoin();
+  if (!BOT.cfg) { box.innerHTML = ''; return; }
+  const row = coin && BOT.ov && BOT.ov.rows.find(r => r.coin === coin);
+  if (!coin || !curBotRows().length) {
+    box.innerHTML = `<p class="hint">Open one of your active bot assets to see its dashboard and range lines on the chart. Click a row below, or search e.g. <code>HL:SOL</code>.</p>`; return;
+  }
+  if (!row || row.error) { box.innerHTML = `<p class="hint">${row ? esc(row.error) : 'Loading…'}</p>`; return; }
+  const bs = row.bots, s = BOT.ov.settings;
+  const tone = n => n <= 0 ? 'bad' : n <= 0.2 ? 'warn' : 'good';
+  const fTone = !s.useFunding ? 'mut' : row.fundingUsedPct < 0 ? 'good' : row.fundingUsedPct > 0 ? 'bad' : '';
+  const r = (label, cells, tip = '') => `<tr title="${esc(tip)}"><td>${label}</td>${cells.join('')}</tr>`;
+  box.innerHTML = `<div class="dash trades"><table>
+    <thead><tr><th>${esc(GB.displayCoin(coin))} ${GB.isXyz(coin) ? '[xyz-Aktie]' : '[Hyperliquid]'}</th>${bs.map(b => `<th>${esc(b.name)}</th>`).join('')}</tr></thead>
+    <tbody>
+    ${r('Pool size', bs.map(b => `<td>${usd(b.cfg.pool)}</td>`), 'Capital the bot has on Hyperliquid')}
+    ${r('MAX price', bs.map(b => `<td class="good">${fmt(b.cfg.max)} (${sign(b.lad.distMax)}%)</td>`), 'Upper grid limit and distance from price')}
+    ${r('MIN price', bs.map(b => `<td class="bad">${fmt(b.cfg.min)} (${sign(b.lad.distMin)}%)</td>`), 'Lower limit. Falling below fires the exit alert')}
+    ${r('Span', bs.map(b => `<td>${fmt(b.lad.span)}$</td>`))}
+    ${r('Net / turn', bs.map(b => `<td class="${tone(b.lad.netPct)}">${sign(b.lad.netPct)}% (${b.lad.netUsd >= 0 ? '+' : '−'}$${Math.abs(b.lad.netUsd).toFixed(2)})</td>`), `Profit per buy+sell on one of ${GB.LEVELS} levels, after fee and ${s.holdHours}h of funding. % is of one level's capital (pool / ${GB.LEVELS}).`)}
+    ${r('Ladder step', bs.map(b => `<td>~$${b.lad.stepUsd.toFixed(2)} (${b.lad.stepPct.toFixed(2)}%)</td>`), `Span / ${GB.LEVELS} levels, before fees`)}
+    ${r(s.fundingMode === 'live' ? 'Funding (live)' : 'Funding (manual)', bs.map(() => `<td class="${fTone}">${s.useFunding ? `${row.fundingUsedPct > 0 ? '+' : ''}${row.fundingUsedPct.toFixed(4)}%/h · ${s.holdHours}h ≈ ${(row.fundingUsedPct * s.holdHours).toFixed(4)}%` : 'off'}</td>`), 'Hourly funding. Red = longs pay.')}
+    ${r('ADX trend', bs.map(() => `<td class="${row.adxState.tone}">${ok(row.adx) ? row.adx.toFixed(1) : '–'} ${esc(row.adxState.label)}</td>`), row.adxState.tip || '')}
+    ${r('Status', bs.map(b => `<td><span class="pill ${b.lad.inRange ? 'in' : 'out'}">${b.lad.inRange ? 'in range' : (b.lad.distMin > 0 ? 'below MIN' : 'above MAX')}</span></td>`))}
+    </tbody></table></div>`;
+}
+function renderOverview() {
+  const box = $('#botOverview'); if (!BOT.ov) return;
+  if (!BOT.ov.rows.length) { box.innerHTML = '<p class="hint">No active assets. Press “Edit bots” and tick some.</p>'; return; }
+  const trs = [];
+  for (const r of BOT.ov.rows) {
+    if (r.error) { trs.push(`<tr><td>${esc(GB.displayCoin(r.coin))}</td><td colspan="5" class="bad">${esc(r.error)}</td></tr>`); continue; }
+    const ch = r.prevDay ? (r.price / r.prevDay - 1) * 100 : 0;
+    r.bots.forEach((b, j) => trs.push(`<tr class="click" data-coin="${esc(r.coin)}">
+      <td>${j ? '' : esc(GB.displayCoin(r.coin)) + (GB.isXyz(r.coin) ? ' <span class="mut">xyz</span>' : '')}</td>
+      <td>${j ? '' : fmtQ(r.price) + ` <span class="${ch >= 0 ? 'good' : 'bad'}">${sign(ch)}%</span>`}</td>
+      <td>${esc(b.name)}</td>
+      <td><span class="pill ${b.lad.inRange ? 'in' : 'out'}">${b.lad.inRange ? 'in' : b.lad.distMin > 0 ? 'below' : 'above'}</span></td>
+      <td class="${b.lad.netPct <= 0 ? 'bad' : b.lad.netPct <= .2 ? 'warn' : 'good'}">${sign(b.lad.netPct)}%</td>
+      <td class="${r.adxState.tone}">${j ? '' : (ok(r.adx) ? r.adx.toFixed(0) : '–')}</td></tr>`));
+  }
+  box.innerHTML = `<table><thead><tr><th>Asset</th><th>Price · 24h</th><th>Bot</th><th>Range</th><th>Net/turn</th><th>ADX</th></tr></thead><tbody>${trs.join('')}</tbody></table>`;
+}
+$('#botOverview').addEventListener('click', e => { const tr = e.target.closest('tr[data-coin]'); if (tr) load('HL:' + tr.dataset.coin, BOT.cfg ? BOT.cfg.settings.tf : S.tf); });
+$('#botTest').addEventListener('click', async () => { try { await api('/api/bots/test', { method: 'POST' }); toast('Test START message sent to your channels'); } catch (e) { toast(e.message, true); } });
+
+// ---- editor ----
+const SETTING_FIELDS = [
+  ['tf', 'Signal timeframe', 'select:1m,5m,15m,1h,4h,1D'], ['minBars', 'Confirm bars'], ['emaFast', 'Fast EMA'], ['emaSlow', 'Mid EMA'], ['emaTrend', 'Trend EMA'],
+  ['adxLen', 'ADX length'], ['adxMin', 'ADX min (trend start)'], ['adxMax', 'ADX max (overheat)'], ['useMacd', 'MACD filter', 'chk'],
+  ['macdFast', 'MACD fast'], ['macdSlow', 'MACD slow'], ['macdSignal', 'MACD signal'], ['atrLen', 'ATR length'], ['lowerMult', 'Auto MIN: ATR × (below EMA 50)'], ['upperMult', 'Auto MAX: ATR × (above price)'],
+  ['useFunding', 'Include funding', 'chk'], ['fundingMode', 'Funding source', 'select:live,manual'], ['fundingPctHr', 'Manual funding %/h'], ['holdHours', 'Hold hours for funding'],
+  ['startAlerts', 'START alerts', 'chk'], ['exitAlerts', 'EXIT / RE-ENTRY alerts', 'chk'], ['lorisLink', 'Loris funding link', 'chk'],
+];
+const draft = { cfg: null };
+function renderEditor() {
+  const c = draft.cfg;
+  const botsHtml = c.bots.map((b, k) => `
+    <div class="botcard" data-k="${k}">
+      <div class="hdr">
+        <label>Name<input data-f="name" value="${esc(b.name)}"></label>
+        <label>Discord mention line<input data-f="mention" value="${esc(b.mention || '')}" placeholder="<@123456789> or @here"></label>
+        <button type="button" class="ctl sm" data-rmbot="${k}">Remove bot</button>
+      </div>
+      <div class="assets trades"><table><thead><tr><th>On</th><th>Coin</th><th>Pool $</th><th>MIN</th><th>MAX</th><th>Fee %</th><th></th></tr></thead><tbody>
+      ${b.assets.map((a, j) => `<tr data-j="${j}"><td><input type="checkbox" data-a="active" ${a.active ? 'checked' : ''} aria-label="Active"></td>
+        <td><input data-a="coin" value="${esc(a.coin)}" placeholder="SOL or xyz:TSLA"></td><td><input data-a="pool" value="${a.pool}" inputmode="decimal"></td>
+        <td><input data-a="min" value="${a.min}" inputmode="decimal"></td><td><input data-a="max" value="${a.max}" inputmode="decimal"></td>
+        <td><input data-a="fee" value="${a.fee}" inputmode="decimal"></td><td><button type="button" class="ctl sm" data-rma="${j}" aria-label="Remove">✕</button></td></tr>`).join('')}
+      </tbody></table></div>
+      <button type="button" class="ctl sm" data-adda="${k}">+ Add asset</button>
+    </div>`).join('');
+  const st = c.settings;
+  const setHtml = SETTING_FIELDS.map(([k, label, kind]) => {
+    if (kind === 'chk') return `<label class="chk"><input type="checkbox" data-s="${k}" ${st[k] ? 'checked' : ''}> ${label}</label>`;
+    if (kind && kind.startsWith('select:')) return `<label>${label}<select data-s="${k}">${kind.slice(7).split(',').map(o => `<option ${st[k] === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label>`;
+    return `<label>${label}<input data-s="${k}" value="${st[k]}" inputmode="decimal"></label>`;
+  }).join('');
+  $('#botsEditor').innerHTML = botsHtml + `<details class="botcard"><summary><b>Signal &amp; alert settings</b></summary><div class="setgrid">${setHtml}</div></details>`;
+}
+function collect() { // read the form back into draft.cfg
+  $$('#botsEditor .botcard[data-k]').forEach(card => {
+    const b = draft.cfg.bots[+card.dataset.k];
+    b.name = card.querySelector('[data-f="name"]').value; b.mention = card.querySelector('[data-f="mention"]').value;
+    card.querySelectorAll('tr[data-j]').forEach(tr => {
+      const a = b.assets[+tr.dataset.j];
+      tr.querySelectorAll('[data-a]').forEach(inp => { const f = inp.dataset.a; a[f] = f === 'active' ? inp.checked : f === 'coin' ? inp.value.trim() : inp.value; });
+    });
+  });
+  $$('#botsEditor [data-s]').forEach(inp => { draft.cfg.settings[inp.dataset.s] = inp.type === 'checkbox' ? inp.checked : inp.value; });
+}
+$('#botEdit').addEventListener('click', () => { if (!BOT.cfg) return; draft.cfg = structuredClone(BOT.cfg); renderEditor(); $('#botsMsg').textContent = ''; $('#botsDialog').showModal(); });
+$('#botsEditor').addEventListener('click', e => {
+  const t = e.target, d = t.dataset;
+  if (!('rmbot' in d || 'rma' in d || 'adda' in d)) return;
+  collect();
+  if ('rmbot' in d) draft.cfg.bots.splice(+d.rmbot, 1);
+  if ('adda' in d) draft.cfg.bots[+d.adda].assets.push({ coin: '', pool: 500, min: 0, max: 0, fee: 0.15, active: false });
+  if ('rma' in d) draft.cfg.bots[+t.closest('.botcard').dataset.k].assets.splice(+d.rma, 1);
+  renderEditor();
+});
+$('#addBot').addEventListener('click', () => { collect(); draft.cfg.bots.push({ name: 'Bot ' + (draft.cfg.bots.length + 1), mention: '', assets: [] }); renderEditor(); });
+$('#saveBots').addEventListener('click', async () => {
+  collect();
+  try {
+    BOT.cfg = await api('/api/bots', { method: 'PUT', body: JSON.stringify(draft.cfg) });
+    draft.cfg = structuredClone(BOT.cfg); BOT.key = ''; $('#botsMsg').textContent = 'Saved. The server is watching the new setup.';
+    draw(); loadOverview();
+  } catch (e) { $('#botsMsg').textContent = e.message; }
+});
+
+// ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
 markTf(); updateGutter(); renderWatch(); showTab(store.get('tab', 'watch'));
 load(S.symbol, S.tf);
-refreshQuotes(); loadAlerts(); loadLog(); listen();
+refreshQuotes(); loadAlerts(); loadLog(); listen(); loadBots().then(loadOverview);
 window.__cs = { S, load, runNow };
