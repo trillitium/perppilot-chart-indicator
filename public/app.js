@@ -10,6 +10,7 @@ const store = {
 async function api(path, opts = {}) {
   const r = await fetch(path, { ...opts, headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) } });
   const j = await r.json().catch(() => ({}));
+  if (r.status === 401) { location.href = '/'; throw new Error('Sign in again'); }
   if (!r.ok) { const e = new Error(j.error || r.statusText); e.line = j.line; throw e; }
   return j;
 }
@@ -886,3 +887,4 @@ markTf(); updateGutter(); renderWatch(); showTab(store.get('tab', 'watch'));
 load(S.symbol, S.tf);
 refreshQuotes(); loadAlerts(); loadLog(); listen(); loadBots().then(loadOverview);
 window.__cs = { S, load, runNow };
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('/sw.js').catch(() => {});

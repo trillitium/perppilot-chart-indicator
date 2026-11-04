@@ -67,20 +67,33 @@ No `npm install` needed. There are zero dependencies.
 
 Discord and Telegram work too. Paste the webhook or bot details in ⚙.
 
-## Run it 24/7
+## Put it on your phone (Railway, about $5/month)
 
-Alerts only fire while the server is running. If your computer sleeps, they stop. Options:
+Alerts only fire while the server runs, so host it somewhere always on. Railway is the quickest.
+
+1. Go to <https://railway.com>, sign in with GitHub, then **New Project → Deploy from GitHub repo → chartsmith**.
+2. Open the service, go to **Variables**, and add `PASSWORD`. Make it long; this is the app's login.
+3. Go to **Settings → Volumes → Add Volume**, mount path `/data`. Then add a variable `DATA_DIR` = `/data`, so alerts and bot settings survive redeploys.
+4. Go to **Settings → Networking → Generate Domain**. You get a `https://….up.railway.app` link.
+5. On the phone, open that link and sign in.
+   - **iPhone:** use Safari. Tap **Share → Add to Home Screen**.
+   - **Android:** use Chrome. Tap **⋮ → Install app**.
+6. In the app, open ⚙. Add the ntfy topic for phone push, and the Discord webhook. Press **Send test**.
+
+It now opens full screen from its own icon, and stays signed in for a year. Every push to `main` redeploys automatically.
+
+Why not Netlify: it only runs short-lived functions, with no always-on process and no saved files. The alert and bot watcher would stop between requests.
+
+## Run it 24/7 somewhere else
 
 - **Leave a computer on.** An old laptop or a Raspberry Pi is plenty.
-- **Railway / Render / Fly.io** (about $5/month): deploy this repo, set the start command to `npm start`, and set these variables:
-  - `PASSWORD` = something long. **Required** once it's on the internet.
-  - `DATA_DIR` = a persistent volume path, so alerts survive restarts.
+- **Render or Fly.io** work like Railway: set the same variables and attach a disk at `DATA_DIR`. Avoid free tiers that sleep; alerts stop while it sleeps.
 
 | Variable | Default | What it does |
 |---|---|---|
 | `PORT` | 8787 | Port to listen on |
 | `HOST` | 127.0.0.1 (0.0.0.0 if `PORT` is set) | Address to bind |
-| `PASSWORD` | none | Browser login. Username can be anything. |
+| `PASSWORD` | none | Login password. Required on any public host. |
 | `DATA_DIR` | `./data` | Where alerts, alert history and settings are saved |
 | `ALERT_INTERVAL_MS` | 15000 | How often alerts are checked |
 

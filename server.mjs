@@ -5,7 +5,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual, createHmac } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import * as data from './lib/providers.mjs';
 import { AlertStore, notify } from './lib/alerts.mjs';
@@ -31,17 +31,39 @@ const STATIC = {
   '/style.css': ['public/style.css', 'text/css; charset=utf-8'],
   '/engine.mjs': ['lib/engine.mjs', 'text/javascript; charset=utf-8'],
   '/gridbot.mjs': ['lib/gridbot.mjs', 'text/javascript; charset=utf-8'],
+};
+// Served without login so the phone can install the app icon before signing in.
+const PUBLIC = {
   '/icon.svg': ['public/icon.svg', 'image/svg+xml'],
+  '/icon-192.png': ['public/icon-192.png', 'image/png'],
+  '/icon-512.png': ['public/icon-512.png', 'image/png'],
+  '/apple-touch-icon.png': ['public/apple-touch-icon.png', 'image/png'],
+  '/manifest.webmanifest': ['public/manifest.webmanifest', 'application/manifest+json'],
+  '/sw.js': ['public/sw.js', 'text/javascript; charset=utf-8'],
 };
 
+// ---- login: one shared password, remembered for a year in a cookie (works inside home-screen apps) ----
+const TOKEN = PASSWORD ? createHmac('sha256', PASSWORD).update('chartsmith-session-v1').digest('hex') : '';
+const same = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && timingSafeEqual(x, y); };
+function cookie(req, name) { const m = (req.headers.cookie || '').match(new RegExp('(?:^|;\\s*)' + name + '=([^;]+)')); return m ? decodeURIComponent(m[1]) : ''; }
 function authed(req) {
   if (!PASSWORD) return true;
-  const h = req.headers.authorization || '';
-  if (!h.startsWith('Basic ')) return false;
-  const pass = Buffer.from(h.slice(6), 'base64').toString().split(':').slice(1).join(':');
-  const a = Buffer.from(pass), b = Buffer.from(PASSWORD);
-  return a.length === b.length && timingSafeEqual(a, b);
+  if (same(cookie(req, 'cs_auth'), TOKEN)) return true;
+  const h = req.headers.authorization || ''; // Basic auth still works for scripts
+  return h.startsWith('Basic ') && same(Buffer.from(h.slice(6), 'base64').toString().split(':').slice(1).join(':'), PASSWORD);
 }
+const fails = new Map(); // ip -> { n, until }
+const ipOf = req => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+const loginPage = (msg = '') => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Chartsmith · Sign in</title><meta name="theme-color" content="#0b0d10"><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Chartsmith">
+<style>:root{color-scheme:dark}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0d10;color:#e6e9ee;font:15px system-ui,-apple-system,sans-serif}
+form{display:flex;flex-direction:column;gap:12px;width:min(320px,calc(100vw - 32px))}h1{margin:0 0 8px;font-size:22px}h1 b{color:#f2b544}
+input,button{height:44px;border-radius:8px;border:1px solid #232831;background:#0f1216;color:inherit;padding:0 12px;font:inherit}button{background:#f2b544;color:#1a1407;border-color:#f2b544;font-weight:600}
+p{margin:0;color:#ff5d6c;min-height:20px;font-size:13px}</style></head><body><form method="post" action="/login">
+<h1>Chart<b>smith</b></h1><input type="password" name="password" placeholder="Password" autocomplete="current-password" autofocus required>
+<button>Sign in</button><p>${msg}</p></form></body></html>`;
+
 const json = (res, code, body) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(body)); };
 async function body(req) {
   let s = ''; for await (const c of req) { s += c; if (s.length > 2e5) throw new Error('Request too large'); }
@@ -51,7 +73,30 @@ const SETTING_KEYS = ['ntfyServer', 'ntfyTopic', 'discordWebhook', 'telegramToke
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x'), p = url.pathname, q = Object.fromEntries(url.searchParams);
-  if (!authed(req)) { res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Chartsmith"' }); return res.end('Password required'); }
+  if (req.method === 'GET' && PUBLIC[p]) {
+    const [f, type] = PUBLIC[p];
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': p === '/sw.js' ? 'no-cache' : 'public, max-age=86400' });
+    return res.end(await readFile(path.join(ROOT, f)));
+  }
+  if (p === '/login' && req.method === 'POST' && PASSWORD) {
+    const ip = ipOf(req), f = fails.get(ip);
+    if (f && f.until > Date.now()) { res.writeHead(429, { 'Content-Type': 'text/html' }); return res.end(loginPage('Too many tries. Wait a minute.')); }
+    let raw = ''; for await (const c of req) { raw += c; if (raw.length > 4096) break; }
+    const pw = new URLSearchParams(raw).get('password') || '';
+    if (!same(pw, PASSWORD)) {
+      const n = (f ? f.n : 0) + 1; fails.set(ip, { n, until: n >= 5 ? Date.now() + 60e3 : 0 });
+      res.writeHead(401, { 'Content-Type': 'text/html' }); return res.end(loginPage('Wrong password.'));
+    }
+    fails.delete(ip);
+    const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
+    res.writeHead(303, { Location: '/', 'Set-Cookie': `cs_auth=${TOKEN}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${secure}` });
+    return res.end();
+  }
+  if (p === '/logout') { res.writeHead(303, { Location: '/', 'Set-Cookie': 'cs_auth=; Path=/; Max-Age=0' }); return res.end(); }
+  if (!authed(req)) {
+    if (p.startsWith('/api/')) return json(res, 401, { error: 'Sign in again' });
+    res.writeHead(p === '/' ? 200 : 401, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(loginPage());
+  }
   try {
     if (req.method === 'GET' && STATIC[p]) {
       const [f, type] = STATIC[p];

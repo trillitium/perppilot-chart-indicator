@@ -29,7 +29,7 @@ h2 { margin: 0; font: 600 12px var(--font-head); letter-spacing: .12em; text-tra
 .app { height: 100%; display: grid; grid-template-rows: auto 1fr; }
 header {
   display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line);
-  padding-block: 8px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-top: calc(8px + env(safe-area-inset-top, 0px)); padding-bottom: 8px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
 }
 .brand { font: 600 18px var(--font-head); letter-spacing: .02em; }
 .brand b { color: var(--accent); }
@@ -133,7 +133,11 @@ legend { padding: 0 6px; font-weight: 600; font-size: 13px; }
   main { grid-template-columns: 1fr; }
   .chart-wrap { height: 60vh; min-height: 340px; border-right: 0; border-bottom: 1px solid var(--line); }
   .pane { overflow: visible; }
-  .hdr-actions { margin-left: 0; }
+  .hdr-actions { margin-left: auto; order: 1; }
+  .search { order: 2; flex-basis: 100%; }
+  .tfs { order: 3; width: 100%; justify-content: space-between; }
+  .tfs button { flex: 1; }
+  .tools { top: 76px; }
   .search { max-width: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
