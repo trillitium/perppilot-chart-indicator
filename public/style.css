@@ -166,6 +166,22 @@ dialog.wide { width: min(860px, calc(100vw - 32px)); max-height: calc(100vh - 48
 .dash td, .dash th { white-space: normal; padding: 5px 6px; }
 .dash td:first-child { white-space: nowrap; }
 
+/* on-chart bot dashboard, laid out like the original TradingView indicator's table */
+.chartdash { position: absolute; z-index: 5; top: 8px; right: 80px; max-width: calc(100% - 96px); background: rgba(11,13,16,.9); border: 1px solid #2a3140; border-radius: 4px; overflow: auto; font: 11.5px/1.3 var(--font-ui); }
+.chartdash table { border-collapse: collapse; }
+.chartdash th { background: #2962ff; color: #fff; font-weight: 500; text-align: right; padding: 4px 9px; white-space: nowrap; position: static; }
+.chartdash th:first-child { text-align: left; cursor: pointer; user-select: none; }
+.chartdash .fold { display: inline-block; margin-left: 8px; opacity: .85; transition: transform .15s; }
+.chartdash.collapsed .fold { transform: rotate(-90deg); }
+.chartdash.collapsed tbody { display: none; }
+.chartdash td { padding: 3px 9px; text-align: right; border-top: 1px solid #1c222c; white-space: nowrap; font-family: var(--font-mono); font-size: 11px; }
+.chartdash td:first-child { text-align: left; color: #c3cad6; font-family: var(--font-ui); font-size: 11.5px; }
+.chartdash .ico { display: inline-block; width: 19px; }
+@media (max-width: 900px) {
+  .chartdash { top: 72px; left: 44px; right: 8px; max-width: none; } /* spans the chart, scrolls sideways with 2+ bots */
+  .chartdash td, .chartdash th { padding: 2px 6px; } .chartdash td { font-size: 10px; } .chartdash td:first-child { font-size: 10.5px; }
+}
+
 /* settings / account / app chrome */
 .set-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 .sp { display: flex; flex-direction: column; gap: 12px; }

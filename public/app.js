@@ -70,8 +70,8 @@ function ago(t) {
 // ---------------------------------------------------------------------------
 const cv = $('#chart'), g = cv.getContext('2d');
 const AXW = 72, AXH = 24;
-let cssW = 0, cssH = 0, dpr = 1, barW = 8, right = 0, hover = null, scale = null;
-const C = { bg: '#0b0d10', line: '#232831', fg: '#e6e9ee', mut: '#8a93a3', up: '#2fd39a', down: '#ff5d6c', accent: '#f2b544', mono: '"IBM Plex Mono", ui-monospace, Menlo, monospace' };
+let cssW = 0, cssH = 0, dpr = 1, barW = 8, right = 0, hover = null, scale = null, axisTags = [];
+const C = { bg: '#0b0d10', line: '#232831', fg: '#e6e9ee', mut: '#8a93a3', up: '#2fd39a', down: '#ff5d6c', accent: '#f2b544', mono: '"IBM Plex Mono", ui-monospace, Menlo, monospace', ui: '"IBM Plex Sans", system-ui, -apple-system, sans-serif' };
 function resize() {
   const r = cv.getBoundingClientRect(); dpr = window.devicePixelRatio || 1;
   cssW = Math.max(200, r.width); cssH = Math.max(200, r.height);
@@ -176,6 +176,9 @@ function draw() {
   drawDrawings(yOf);
   g.restore();
 
+  // price tags on the axis for the bot lines and EMAs, like the original indicator's chart
+  for (const t of axisTags) if (t.y > top && t.y < priceH) axisTag(t.y, t.color, t.text);
+
   // price-alert levels on the axis
   for (const a of alertsCache) if (a.active && a.kind === 'price' && a.symbol === S.symbol) {
     const y = yOf(a.level); if (y < top || y > priceH) continue;
@@ -188,8 +191,11 @@ function draw() {
   const lb = bars[bars.length - 1], ly = yOf(lb.c), lc = lb.c >= lb.o ? C.up : C.down;
   if (ly > top && ly < priceH) {
     g.globalAlpha = .5; g.strokeStyle = lc; g.setLineDash([2, 3]); g.beginPath(); g.moveTo(0, Math.round(ly) + .5); g.lineTo(pw, Math.round(ly) + .5); g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
-    g.fillStyle = lc; g.fillRect(pw, ly - 9, AXW, 18);
-    g.fillStyle = '#0b0d10'; g.textAlign = 'left'; g.textBaseline = 'middle'; g.font = '600 11px ' + C.mono; g.fillText(fmt(lb.c), pw + 6, ly);
+    const cd = intraday() ? countdown(lb.t + TF_MS[S.tf]) : '', th = cd ? 30 : 18;
+    g.fillStyle = lc; g.fillRect(pw, ly - th / 2, AXW, th);
+    g.fillStyle = '#0b0d10'; g.textAlign = 'left'; g.textBaseline = 'middle'; g.font = '600 11px ' + C.mono;
+    if (cd) { g.fillText(fmt(lb.c), pw + 6, ly - 6); g.font = '10px ' + C.mono; g.fillText(cd, pw + 6, ly + 8); } // time left on this bar
+    else g.fillText(fmt(lb.c), pw + 6, ly);
   }
 
   // lower pane
@@ -234,25 +240,39 @@ function draw() {
   legend(hi_, panelTop, hasPanel, plots);
   placeChip();
 }
-function line(arr, color, i0, i1, yOf) {
-  g.strokeStyle = color; g.lineWidth = 1.6; g.beginPath(); let pen = false;
+function line(arr, color, i0, i1, yOf, w = 1.6) {
+  g.strokeStyle = color; g.lineWidth = w; g.beginPath(); let pen = false;
   for (let i = i0; i <= i1; i++) { const v = arr[i]; if (!ok(v)) { pen = false; continue; } const x = xOf(i), y = yOf(v); pen ? g.lineTo(x, y) : g.moveTo(x, y); pen = true; }
   g.stroke(); g.lineWidth = 1;
 }
+function axisTag(y, color, text, h = 16) {
+  const pw = plotW(); g.fillStyle = color; g.fillRect(pw, y - h / 2, AXW, h);
+  g.fillStyle = '#0b0d10'; g.textAlign = 'left'; g.textBaseline = 'middle'; g.font = '600 10.5px ' + C.mono; g.fillText(text, pw + 5, y);
+}
+function countdown(t) {
+  const s = Math.max(0, Math.floor((t - Date.now()) / 1000)), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+  return (h ? h + ':' + pad(m) : m) + ':' + pad(s % 60);
+}
 function legend(i, panelTop, hasPanel, plots) {
-  const b = S.bars[i], prev = i ? S.bars[i - 1].c : b.o, ch = (b.c / prev - 1) * 100;
+  const bars = S.bars, b = bars[i];
+  // change over the last 24h on intraday charts (what the exchange header shows), otherwise vs the previous close
+  let ref = i ? bars[i - 1].c : b.o;
+  if (intraday()) { const t0 = b.t - 864e5; for (let j = i; j >= 0; j--) if (bars[j].t <= t0) { ref = bars[j].c; break; } }
+  const chg = b.c - ref, pct = ref ? chg / ref * 100 : 0, col = chg >= 0 ? C.up : C.down;
   g.textBaseline = 'top'; g.textAlign = 'left';
   let x = 10, y = 10;
-  g.font = '600 13px ' + C.mono; g.fillStyle = C.fg; const head = display(S.symbol) + ' · ' + S.tf;
-  g.fillText(head, x, y); x += g.measureText(head).width + 10;
-  g.font = '11px ' + C.mono; g.fillStyle = C.mut;
-  const sub = (S.meta.name && S.meta.name !== display(S.symbol) ? S.meta.name + ' · ' : '') + (S.meta.exchange || '') + (S.meta.delayed ? ' · may be delayed' : ' · live');
-  g.fillText(sub, x, y + 2); y += 20; x = 10;
+  g.font = '600 14px ' + C.ui; g.fillStyle = C.fg;
+  const head = (S.meta.name && S.meta.name !== display(S.symbol) ? S.meta.name : display(S.symbol)) + ' · ' + S.tf + (S.meta.exchange ? ' · ' + S.meta.exchange : '');
+  g.fillText(head, x, y); x += g.measureText(head).width + 8;
+  g.fillStyle = S.meta.delayed ? C.accent : C.up; g.beginPath(); g.arc(x + 5, y + 9, 4, 0, 7); g.fill(); // live / delayed dot
+  y += 21; x = 10;
+  g.font = '600 15px ' + C.mono; g.fillStyle = col; const ps = fmt(b.c); g.fillText(ps, x, y); x += g.measureText(ps).width + 8;
+  g.font = '12px ' + C.mono; g.fillText(`${chg >= 0 ? '+' : '−'}${fmt(Math.abs(chg))} (${pct >= 0 ? '+' : '−'}${Math.abs(pct).toFixed(2)}%)`, x, y + 3);
+  y += 21; x = 10; g.font = '11px ' + C.mono;
   for (const [k, v] of [['O', b.o], ['H', b.h], ['L', b.l], ['C', b.c]]) {
     g.fillStyle = C.mut; g.fillText(k, x, y); x += 10; g.fillStyle = b.c >= b.o ? C.up : C.down; const s = fmt(v); g.fillText(s, x, y); x += g.measureText(s).width + 10;
     if (x > plotW() - 80) { x = 10; y += 15; }
   }
-  g.fillStyle = ch >= 0 ? C.up : C.down; const cs = (ch >= 0 ? '+' : '') + ch.toFixed(2) + '%'; g.fillText(cs, x, y); x += g.measureText(cs).width + 10;
   g.fillStyle = C.mut; g.fillText('Vol ' + fmtVol(b.v), x, y);
   let oy = y + 17, py = panelTop + 6;
   for (const p of plots) {
@@ -856,6 +876,7 @@ async function loadOverview() {
   finally { ovBusy = false; }
 }
 setInterval(() => { if (!document.hidden && (store.get('tab') === 'bots' || curCoin())) loadOverview(); }, 20000);
+setInterval(() => { if (!document.hidden && S.bars.length && intraday()) draw(); }, 1000); // bar-close countdown on the price tag
 
 function botAnalysis() {
   const rows = curBotRows(); if (!rows.length || !S.bars.length) return null;
@@ -875,57 +896,76 @@ function botAnalysis() {
   return { rows, ind: BOT.ind };
 }
 function drawBotOverlay(i0, i1, yOf) {
+  axisTags = [];
   const a = botAnalysis(); if (!a) return;
-  const { rows, ind } = a, pw = plotW();
-  line(ind.fast, '#2dd4bf', i0, i1, yOf); line(ind.slow, '#fb923c', i0, i1, yOf); line(ind.trend, '#3b82f6', i0, i1, yOf);
-  g.font = '10px ' + C.mono; g.textAlign = 'left'; g.textBaseline = 'bottom';
-  for (const { bot, cfg, k } of rows) {
+  const { rows, ind } = a, pw = plotW(), n = S.bars.length - 1;
+  // EMA 20 / 50 / 200 (trend line heavier), each price-tagged on the axis
+  for (const [arr, col, w] of [[ind.fast, '#2dd4bf', 1.3], [ind.slow, '#fb923c', 1.8], [ind.trend, '#3b82f6', 2.4]]) {
+    line(arr, col, i0, i1, yOf, w); if (ok(arr[n])) axisTags.push({ y: yOf(arr[n]), color: col, text: fmt(arr[n]) });
+  }
+  g.lineWidth = 1;
+  // MIN / MAX as dotted lines in the bot's colours, price-tagged on the axis
+  g.lineCap = 'round'; g.lineWidth = 2.2;
+  for (const { cfg, k } of rows) {
     const [cMax, cMin] = BOT_COL[k % BOT_COL.length];
-    for (const [v, c, lab] of [[cfg.max, cMax, 'MAX'], [cfg.min, cMin, 'MIN']]) {
-      const y = Math.round(yOf(v)) + .5; g.strokeStyle = c; g.setLineDash([6, 4]); g.beginPath(); g.moveTo(0, y); g.lineTo(pw, y); g.stroke(); g.setLineDash([]);
-      g.fillStyle = c; g.textAlign = 'right'; g.fillText(`${bot.name} ${lab} ${fmt(v)}`, pw - 6, y - 2); g.textAlign = 'left';
+    for (const [v, c] of [[cfg.max, cMax], [cfg.min, cMin]]) {
+      const y = Math.round(yOf(v)) + .5; g.strokeStyle = c; g.setLineDash([0.1, 5]); g.beginPath(); g.moveTo(2, y); g.lineTo(pw, y); g.stroke();
+      axisTags.push({ y, color: c, text: fmt(v) });
     }
   }
-  const tri = (x, y, up, col) => { g.fillStyle = col; g.beginPath(); if (up) { g.moveTo(x, y - 6); g.lineTo(x + 6, y + 5); g.lineTo(x - 6, y + 5); } else { g.moveTo(x, y + 6); g.lineTo(x + 6, y - 5); g.lineTo(x - 6, y - 5); } g.closePath(); g.fill(); };
-  g.textAlign = 'center';
-  for (let i = i0; i <= i1; i++) if (ind.start[i]) { const x = xOf(i), y = yOf(S.bars[i].l) + 14; tri(x, y, true, '#2fd39a'); g.fillStyle = '#2fd39a'; g.textBaseline = 'top'; g.fillText('START', x, y + 7); }
+  g.setLineDash([]); g.lineCap = 'butt'; g.lineWidth = 1;
+  // markers the way the indicator plotted them: red triangle with its warning text above, green triangle under a START bar
+  const tri = (x, y, up, col, s = 9) => { g.fillStyle = col; g.beginPath(); if (up) { g.moveTo(x, y - s); g.lineTo(x + s, y + s * .8); g.lineTo(x - s, y + s * .8); } else { g.moveTo(x, y + s); g.lineTo(x + s, y - s * .8); g.lineTo(x - s, y - s * .8); } g.closePath(); g.fill(); };
+  g.textAlign = 'center'; g.font = '600 10px ' + C.ui;
+  for (let i = i0; i <= i1; i++) if (ind.start[i]) { const x = xOf(i), y = yOf(S.bars[i].l) + 16; tri(x, y, true, '#2fd39a'); g.fillStyle = '#2fd39a'; g.textBaseline = 'top'; g.fillText('START', x, y + 10); }
   for (const e of BOT.events) {
     if (e.i < i0 || e.i > i1) continue;
     const x = xOf(e.i), b = S.bars[e.i];
-    if (e.type === 'exit') { const y = yOf(b.h) - 14; tri(x, y, false, '#ff5d6c'); g.fillStyle = '#ff5d6c'; g.textBaseline = 'bottom'; g.fillText('EXIT', x, y - 7); }
-    else if (e.type === 'above') { const y = yOf(b.h) - 14; tri(x, y, true, '#f2b544'); g.fillStyle = '#f2b544'; g.textBaseline = 'bottom'; g.fillText('ABOVE MAX', x, y - 8); }
-    else { const y = yOf(b.l) + 14; g.fillStyle = '#7fd1e8'; g.beginPath(); g.moveTo(x, y - 6); g.lineTo(x + 5, y); g.lineTo(x, y + 6); g.lineTo(x - 5, y); g.closePath(); g.fill(); g.textBaseline = 'top'; g.fillText('RE-ENTRY', x, y + 8); }
+    if (e.type === 'exit') { const y = yOf(b.h) - 16; tri(x, y, false, '#ef4444'); g.fillStyle = '#4c7dff'; g.textBaseline = 'bottom'; g.fillText('WARNUNG EXIT', x, y - 10); }
+    else if (e.type === 'above') { const y = yOf(b.h) - 16; tri(x, y, true, '#f2b544'); g.fillStyle = '#f2b544'; g.textBaseline = 'bottom'; g.fillText('ABOVE MAX', x, y - 10); }
+    else { const y = yOf(b.l) + 16; g.fillStyle = '#7fd1e8'; g.beginPath(); g.moveTo(x, y - 7); g.lineTo(x + 6, y); g.lineTo(x, y + 7); g.lineTo(x - 6, y); g.closePath(); g.fill(); g.textBaseline = 'top'; g.fillText('RE-ENTRY', x, y + 9); }
   }
 }
 
 const sign = v => (v > 0 ? '+' : '') + v.toFixed(2);
 const usd = v => '$' + Math.round(v).toLocaleString('en-US');
 function renderBotDash() {
-  const box = $('#botDash'), coin = curCoin();
-  if (!BOT.cfg) { box.innerHTML = ''; return; }
+  const side = $('#botDash'), over = $('#chartDash'), coin = curCoin();
+  over.hidden = true;
+  if (!BOT.cfg) { side.innerHTML = ''; return; }
   const row = coin && BOT.ov && BOT.ov.rows.find(r => r.coin === coin);
   if (!coin || !curBotRows().length) {
-    box.innerHTML = `<p class="hint">Open one of your active bot assets to see its dashboard and range lines on the chart. Click a row below, or search e.g. <code>HL:SOL</code>.</p>`; return;
+    side.innerHTML = `<p class="hint">Open one of your active bot assets to see its dashboard on the chart. Click a row below, or search e.g. <code>HL:SOL</code>.</p>`; return;
   }
-  if (!row || row.error) { box.innerHTML = `<p class="hint">${row ? esc(row.error) : 'Loading…'}</p>`; return; }
+  if (!row || row.error) { side.innerHTML = `<p class="hint">${row ? esc(row.error) : 'Loading…'}</p>`; return; }
+  side.innerHTML = `<p class="hint">The ${esc(GB.displayCoin(coin))} dashboard is on the chart. Tap its blue header to fold it away.</p>`;
   const bs = row.bots, s = BOT.ov.settings;
   const tone = n => n <= 0 ? 'bad' : n <= 0.2 ? 'warn' : 'good';
   const fTone = !s.useFunding ? 'mut' : row.fundingUsedPct < 0 ? 'good' : row.fundingUsedPct > 0 ? 'bad' : '';
-  const r = (label, cells, tip = '') => `<tr title="${esc(tip)}"><td>${label}</td>${cells.join('')}</tr>`;
-  box.innerHTML = `<div class="dash trades"><table>
-    <thead><tr><th>${esc(GB.displayCoin(coin))} ${GB.isXyz(coin) ? '[xyz-Aktie]' : '[Hyperliquid]'}</th>${bs.map(b => `<th>${esc(b.name)}</th>`).join('')}</tr></thead>
+  const colOf = b => BOT_COL[Math.max(0, BOT.cfg.bots.findIndex(x => x.name === b.name)) % BOT_COL.length];
+  const fundCost = row.fundingUsedPct * s.holdHours;
+  const fund = s.useFunding ? `${row.fundingUsedPct > 0 ? '+' : ''}${row.fundingUsedPct.toFixed(4)}%/h (${fundCost > 0 ? '+' : ''}${fundCost.toFixed(4)}%)` : 'off';
+  const r = (icon, label, cells, tip = '') => `<tr title="${esc(tip)}"><td><span class="ico">${icon}</span>${label}</td>${cells.join('')}</tr>`;
+  over.innerHTML = `<table>
+    <thead><tr><th>${esc(GB.displayCoin(coin))} ${GB.isXyz(coin) ? '[xyz]' : '[Hyperliquid]'}<span class="fold">▾</span></th>${bs.map(b => `<th>${esc(b.name)}</th>`).join('')}</tr></thead>
     <tbody>
-    ${r('Pool size', bs.map(b => `<td>${usd(b.cfg.pool)}</td>`), 'Capital the bot has on Hyperliquid')}
-    ${r('MAX price', bs.map(b => `<td class="good">${fmt(b.cfg.max)} (${sign(b.lad.distMax)}%)</td>`), 'Upper grid limit and distance from price')}
-    ${r('MIN price', bs.map(b => `<td class="bad">${fmt(b.cfg.min)} (${sign(b.lad.distMin)}%)</td>`), 'Lower limit. Falling below fires the exit alert')}
-    ${r('Span', bs.map(b => `<td>${fmt(b.lad.span)}$</td>`))}
-    ${r('Net / turn', bs.map(b => `<td class="${tone(b.lad.netPct)}">${sign(b.lad.netPct)}% (${b.lad.netUsd >= 0 ? '+' : '−'}$${Math.abs(b.lad.netUsd).toFixed(2)})</td>`), `Profit per buy+sell on one of ${GB.LEVELS} levels, after fee and ${s.holdHours}h of funding. % is of one level's capital (pool / ${GB.LEVELS}).`)}
-    ${r('Ladder step', bs.map(b => `<td>~$${b.lad.stepUsd.toFixed(2)} (${b.lad.stepPct.toFixed(2)}%)</td>`), `Span / ${GB.LEVELS} levels, before fees`)}
-    ${r(s.fundingMode === 'live' ? 'Funding (live)' : 'Funding (manual)', bs.map(() => `<td class="${fTone}">${s.useFunding ? `${row.fundingUsedPct > 0 ? '+' : ''}${row.fundingUsedPct.toFixed(4)}%/h · ${s.holdHours}h ≈ ${(row.fundingUsedPct * s.holdHours).toFixed(4)}%` : 'off'}</td>`), 'Hourly funding. Red = longs pay.')}
-    ${r('ADX trend', bs.map(() => `<td class="${row.adxState.tone}">${ok(row.adx) ? row.adx.toFixed(1) : '–'} ${esc(row.adxState.label)}</td>`), row.adxState.tip || '')}
-    ${r('Status', bs.map(b => `<td><span class="pill ${b.lad.inRange ? 'in' : 'out'}">${b.lad.inRange ? 'in range' : (b.lad.distMin > 0 ? 'below MIN' : 'above MAX')}</span></td>`))}
-    </tbody></table></div>`;
+    ${r('💵', 'Pool Größe', bs.map(b => `<td>${usd(b.cfg.pool)}</td>`), 'Capital the bot has on Hyperliquid')}
+    ${r('🟢', 'MAX PRICE', bs.map(b => `<td style="color:${colOf(b)[0]}">${fmt(b.cfg.max)} (${sign(b.lad.distMax)}%)</td>`), 'Upper grid limit and distance from price')}
+    ${r('🔴', 'MIN PRICE', bs.map(b => `<td style="color:${colOf(b)[1]}">${fmt(b.cfg.min)} (${sign(b.lad.distMin)}%)</td>`), 'Lower limit. Falling below fires the exit alert')}
+    ${r('📐', 'Spanne', bs.map(b => `<td>${fmtQ(b.lad.span)}$</td>`), 'MAX − MIN')}
+    ${r('💰', 'Netto / Turn', bs.map(b => `<td class="${tone(b.lad.netPct)}">${sign(b.lad.netPct)}% (${b.lad.netUsd >= 0 ? '+' : '−'}$${Math.abs(b.lad.netUsd).toFixed(2)})</td>`), `Profit per buy+sell on one of ${GB.LEVELS} levels, after fee and ${s.holdHours}h of funding. % is of one level's capital (pool / ${GB.LEVELS}).`)}
+    ${r('🪜', 'Ladder Step', bs.map(b => `<td>~$${b.lad.stepUsd.toFixed(2)}</td>`), `Span / ${GB.LEVELS} levels, before fees (${bs.map(b => b.lad.stepPct.toFixed(2) + '%').join(' · ')})`)}
+    ${r('⚡', 'Funding Rate', bs.map(() => `<td class="${fTone}">${fund}</td>`), `Hourly funding${s.fundingMode === 'live' ? ' (live)' : ' (manual)'} and its cost over ${s.holdHours}h. Red = longs pay.`)}
+    ${r('🧭', 'ADX Trend', bs.map(() => `<td class="${row.adxState.tone}">${ok(row.adx) ? row.adx.toFixed(1) : '–'} (${esc(row.adxState.label)})</td>`), row.adxState.tip || '')}
+    ${r('📍', 'Status', bs.map(b => `<td><span class="pill ${b.lad.inRange ? 'in' : 'out'}">${b.lad.inRange ? 'in range' : (b.lad.distMin > 0 ? 'below MIN' : 'above MAX')}</span></td>`))}
+    </tbody></table>`;
+  over.classList.toggle('collapsed', !!store.get('dashFold', false));
+  over.hidden = false;
 }
+$('#chartDash').addEventListener('click', e => {
+  if (!e.target.closest('th:first-child')) return;
+  const fold = !store.get('dashFold', false); store.set('dashFold', fold); $('#chartDash').classList.toggle('collapsed', fold);
+});
 function renderOverview() {
   const box = $('#botOverview'); if (!BOT.ov) return;
   if (!BOT.ov.rows.length) { box.innerHTML = '<p class="hint">No active assets. Press “Edit bots” and tick some.</p>'; return; }

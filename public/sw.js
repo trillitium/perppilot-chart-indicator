@@ -1,6 +1,6 @@
 // Chartsmith service worker: installable app shell, push notifications, tap-to-open.
 // App files: network first, cached copy if offline. Market data (/api) is never cached.
-const CACHE = 'chartsmith-v3';
+const CACHE = 'chartsmith-v4';
 const SHELL = ['/', '/app.js', '/style.css', '/engine.mjs', '/gridbot.mjs', '/icon.svg', '/icon-192.png', '/manifest.webmanifest'];
 
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).catch(() => {})); self.skipWaiting(); });
