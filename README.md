@@ -39,13 +39,24 @@ For Discord pings that actually notify someone, put a real mention in a bot's *D
 
 1. Install **Node.js 20 or newer** from <https://nodejs.org> (the LTS button).
 2. Download this repo (green **Code** button → **Download ZIP**) and unzip it.
-3. Open a terminal in the folder and run:
-   ```bash
-   npm start
-   ```
-4. Open <http://localhost:8787>.
+3. Start it:
+   - **Windows:** double-click **Start Chartsmith.bat**.
+   - **Mac:** right-click **Start Chartsmith.command** → **Open**. You only need right-click the first time.
+   - **Or** open a terminal *inside the folder* and run `npm start`.
+4. Your browser opens <http://localhost:8787>. Keep the black terminal window open; closing it stops the app and its alerts.
 
 No `npm install` needed. There are zero dependencies.
+
+### If it won't start
+
+| What you see | Fix |
+|---|---|
+| `npm` / `node` is not recognized / command not found | Node.js isn't installed. Get the **LTS** version from <https://nodejs.org>, then close and reopen the terminal. |
+| `Chartsmith needs Node.js 20 or newer` | Install the current LTS from <https://nodejs.org>. |
+| `Missing script: "start"` or `ENOENT … package.json` | You're in the wrong folder. The ZIP unpacks into `chartsmith-main`. `cd` into the folder that contains `package.json`. |
+| `Port … is already in use` | Chartsmith is already running in another window. Use that one, or close it first. |
+| Terminal says "running" but no browser window | Open <http://localhost:8787> yourself (or the port it printed). |
+| Mac says the file "can't be opened" | Right-click → Open, then Open again. |
 
 ## Get alerts on your phone
 

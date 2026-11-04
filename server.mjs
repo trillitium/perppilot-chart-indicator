@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { timingSafeEqual } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import * as data from './lib/providers.mjs';
 import { AlertStore, notify } from './lib/alerts.mjs';
 import { BotMonitor } from './lib/botmonitor.mjs';
@@ -104,4 +105,25 @@ const server = http.createServer(async (req, res) => {
 let running = false;
 setInterval(async () => { if (running) return; running = true; try { await store.check(); await bots.check(); } catch (e) { console.warn('[check]', e.message); } finally { running = false; } }, CHECK_MS);
 
-server.listen(PORT, HOST, () => console.log(`Chartsmith running at http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}  (alerts checked every ${CHECK_MS / 1000}s)`));
+// Start listening. If the default port is taken, try the next few instead of crashing.
+const portFixed = !!process.env.PORT;
+function listen(port, triesLeft) {
+  server.once('error', e => {
+    if (e.code === 'EADDRINUSE' && !portFixed && triesLeft > 0) { console.log(`Port ${port} is busy, trying ${port + 1}…`); return listen(port + 1, triesLeft - 1); }
+    if (e.code === 'EADDRINUSE') console.error(`\n  Port ${port} is already in use. Is Chartsmith already running in another window? Close it, or start with a different port:  PORT=8790 npm start\n`);
+    else console.error(`\n  Chartsmith could not start: ${e.message}\n`);
+    process.exit(1);
+  });
+  server.listen(port, HOST, () => {
+    const url = `http://${HOST === '0.0.0.0' || HOST === '127.0.0.1' ? 'localhost' : HOST}:${port}`;
+    console.log(`\n  Chartsmith is running → ${url}\n  Leave this window open; closing it stops the app and its alerts.  (alerts checked every ${CHECK_MS / 1000}s)\n`);
+    openBrowser(url);
+  });
+}
+// Open the app in the default browser when running on a personal computer.
+function openBrowser(url) {
+  if (process.env.NO_OPEN || portFixed || process.env.CI) return;
+  const cmd = process.platform === 'darwin' ? ['open', [url]] : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] : ['xdg-open', [url]];
+  try { const child = spawn(cmd[0], cmd[1], { stdio: 'ignore', detached: true }); child.on('error', () => {}); child.unref(); } catch { /* no browser available; the URL is printed above */ }
+}
+listen(PORT, 9);
